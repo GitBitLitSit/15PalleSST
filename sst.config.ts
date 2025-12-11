@@ -26,10 +26,6 @@ export default $config({
       },
       architecture: "arm64",
       runtime: "nodejs22.x",
-      // CHANGE 1: Remove the manual 'role'
-      // role: process.env.AWS_LAMBDA_ROLE, 
-      
-      // CHANGE 2: Add permissions for SES explicitly here
       permissions: [
         {
           actions: ["ses:SendEmail", "ses:SendRawEmail"],
@@ -48,5 +44,45 @@ export default $config({
       architecture: "arm64",
       runtime: "nodejs22.x",
     });
+    
+    api.route("POST /qrcode/validate", {
+      handler: "./src/packages/functions/validateQrCode.handler",
+      environment: {
+        RASPBERRY_PI_API_KEY: process.env.RASPBERRY_PI_API_KEY!,
+      },
+      architecture: "arm64",
+      runtime: "nodejs22.x",
+    })
+
+    const webSocket = new sst.aws.ApiGatewayWebSocket("RealtimeApi");
+
+    webSocket.route("$connect", {
+      handler: "./src/packages/functions/websocket.connect",
+      environment: {
+        MONGODB_URI: process.env.MONGODB_URI!,
+        MONGODB_DB_NAME: process.env.MONGODB_DB_NAME!,
+      }
+    });
+
+    webSocket.route("$disconnect", {
+      handler: "./src/packages/functions/websocket.disconnect",
+      environment: {
+        MONGODB_URI: process.env.MONGODB_URI!,
+        MONGODB_DB_NAME: process.env.MONGODB_DB_NAME!,
+      }
+    });
+
+    api.route("POST /check-in", {
+      handler: "./src/packages/functions/checkIn.handler",
+      environment: {
+        WEBSOCKET_API_URL: webSocket.url,
+      },
+      permissions: [ 
+        {
+          actions: ["execute-api:ManageConnections"],
+          resources: ["*"]
+        }
+       ]
+    })
   }
 });
