@@ -17,7 +17,7 @@ export default $config({
     const api = new sst.aws.ApiGatewayV2("Api");
 
     api.route("POST /members", {
-      handler: "./src/packages/functions/createMember.handler",
+      handler: "./src/handlers/members/create.handler",
       environment: {
         JWT_SECRET_KEY: process.env.JWT_SECRET_KEY!,
         MONGODB_URI: process.env.MONGODB_URI!,
@@ -35,7 +35,7 @@ export default $config({
     });
 
     api.route("POST /admin/login", {
-      handler: "./src/packages/functions/adminLogin.handler",
+      handler: "./src/handlers/admin/login.handler",
       environment: {
         JWT_SECRET_KEY: process.env.JWT_SECRET_KEY!,
         ADMIN_USERNAME: process.env.ADMIN_USERNAME!,
@@ -44,23 +44,11 @@ export default $config({
       architecture: "arm64",
       runtime: "nodejs22.x",
     });
-    
-    api.route("POST /qrcode/validate", {
-      handler: "./src/packages/functions/validateQrCode.handler",
-      environment: {
-        JWT_SECRET_KEY: process.env.JWT_SECRET_KEY!,
-        MONGODB_URI: process.env.MONGODB_URI!,
-        MONGODB_DB_NAME: process.env.MONGODB_DB_NAME!,
-        RASPBERRY_PI_API_KEY: process.env.RASPBERRY_PI_API_KEY!,
-      },
-      architecture: "arm64",
-      runtime: "nodejs22.x",
-    })
 
     const webSocket = new sst.aws.ApiGatewayWebSocket("RealtimeApi");
 
     webSocket.route("$connect", {
-      handler: "./src/packages/functions/websocket.connect",
+      handler: "./src/handlers/websocket/connect.handler",
       environment: {
         MONGODB_URI: process.env.MONGODB_URI!,
         MONGODB_DB_NAME: process.env.MONGODB_DB_NAME!,
@@ -68,7 +56,7 @@ export default $config({
     });
 
     webSocket.route("$disconnect", {
-      handler: "./src/packages/functions/websocket.disconnect",
+      handler: "./src/handlers/websocket/disconnect.handler",
       environment: {
         MONGODB_URI: process.env.MONGODB_URI!,
         MONGODB_DB_NAME: process.env.MONGODB_DB_NAME!,
@@ -76,9 +64,13 @@ export default $config({
     });
 
     api.route("POST /check-in", {
-      handler: "./src/packages/functions/checkIn.handler",
+      handler: "./src/handlers/access/checkIn.handler",
       environment: {
         WEBSOCKET_API_URL: webSocket.url,
+        MONGODB_URI: process.env.MONGODB_URI!,
+        MONGODB_DB_NAME: process.env.MONGODB_DB_NAME!,
+        JWT_SECRET_KEY: process.env.JWT_SECRET_KEY!,
+        RASPBERRY_PI_API_KEY: process.env.RASPBERRY_PI_API_KEY!,
       },
       permissions: [ 
         {
