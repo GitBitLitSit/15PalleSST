@@ -2,14 +2,17 @@ import { APIGatewayProxyHandlerV2 } from "aws-lambda";
 import { connectToMongo } from "../../adapters/database";
 import { Member, EmailVerification } from "../../lib/types";
 import { sendQrCodeEmail } from "../../adapters/email";
+import QRCode from "qrcode";
 
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     try {
-        let { email, verificationCode } = JSON.parse(event.body || "{}");
+        let { email, verificationCode, deliveryMethod } = JSON.parse(event.body || "{}");
 
         const trimmedEmail = email?.trim() ?? "";
         const trimmedVerificationCode = verificationCode?.trim() ?? "";
+
+        const method = (deliveryMethod === "email") ? "email" : "display";
 
         if (!trimmedEmail || !trimmedVerificationCode) {
             return {
@@ -32,12 +35,12 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
         const emailVerificationCollection = db.collection<EmailVerification>("emailVerifications");
 
-        const emailVerificationRecord = await emailVerificationCollection.findOne({ memberId: memberRecord._id });
+        const emailVerificationRecord = await emailVerificationCollection.findOne({ memberId: memberRecord._id, verificationCode: trimmedVerificationCode });
 
         if (!emailVerificationRecord) {
             return {
-                statusCode: 404,
-                body: JSON.stringify({ error: "No verification record found for this member" }),
+                statusCode: 403,
+                body: JSON.stringify({ error: "Invalid email or verification code" }),
             }
         } else if (new Date(emailVerificationRecord.expiresAt) < new Date()) {
             return {
@@ -58,11 +61,23 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
         await emailVerificationCollection.deleteOne({ _id: emailVerificationRecord._id });
 
-        await sendQrCodeEmail(process.env.SES_SENDER_EMAIL!, memberRecord.firstName, memberRecord.lastName, memberRecord.email, memberRecord.qrUuid);
+        let responseBody = {};
+    
+        if (method === "email") {
+            await sendQrCodeEmail(process.env.SES_SENDER_EMAIL!, memberRecord.firstName, memberRecord.lastName, memberRecord.email, memberRecord.qrUuid);
+            responseBody = { success: true, message: "QR Code has been sent to your email." };
+        } else {
+            const qrImage = await QRCode.toDataURL(memberRecord.qrUuid);
+            responseBody = {
+                success: true,
+                message: "Code verified successfully.",
+                qrImage: qrImage
+            }
+        }
 
         return {
             statusCode: 200,
-            body: JSON.stringify({ message: "Verification successful. QR code email resent." }),
+            body: JSON.stringify(responseBody),
         };
     } catch (error) {
         return {

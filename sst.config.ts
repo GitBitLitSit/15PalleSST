@@ -56,6 +56,20 @@ export default $config({
       runtime: "nodejs22.x",
     })
 
+    api.route("POST /members/recover", {
+      handler: "./src/handlers/members/recover.handler",
+      environment: {
+        MONGODB_URI: process.env.MONGODB_URI!,
+        MONGODB_DB_NAME: process.env.MONGODB_DB_NAME!,
+        SES_SENDER_EMAIL: process.env.SES_SENDER_EMAIL!,
+      },
+      permissions: [
+        {
+          actions: ["ses:SendEmail", "ses:SendRawEmail"],
+          resources: ["*"]
+        }
+      ]
+    });
 
     const webSocket = new sst.aws.ApiGatewayWebSocket("RealtimeApi");
 
