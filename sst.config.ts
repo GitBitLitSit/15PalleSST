@@ -45,6 +45,18 @@ export default $config({
       runtime: "nodejs22.x",
     });
 
+    api.route("GET /members", {
+      handler: "./src/handlers/members/get.handler",
+      environment: {
+        JWT_SECRET_KEY: process.env.JWT_SECRET_KEY!,
+        MONGODB_URI: process.env.MONGODB_URI!,
+        MONGODB_DB_NAME: process.env.MONGODB_DB_NAME!,
+      },
+      architecture: "arm64",
+      runtime: "nodejs22.x",
+    })
+
+
     const webSocket = new sst.aws.ApiGatewayWebSocket("RealtimeApi");
 
     webSocket.route("$connect", {
