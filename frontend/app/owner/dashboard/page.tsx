@@ -1,6 +1,7 @@
 "use client"
 
-import { RequireRole } from "@/components/require-role"
+import { useEffect, useState, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
@@ -19,17 +20,15 @@ import {
 } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Label } from "@/components/ui/label"
-import { members, auth, checkIn } from "@/lib/mock-api"
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { getMembers, createMember, resetQrCode } from "@/lib/api"
+import { useRealtimeCheckIns } from "@/hooks/use-realtime"
+import type { Member, CheckInEvent } from "@/lib/types"
 import {
   LogOut,
   Users,
   Download,
   Upload,
   Eye,
-  Lock,
-  Unlock,
   RotateCcw,
   Printer,
   UserPlus,
@@ -37,17 +36,22 @@ import {
   ChevronRight,
   AlertCircle,
 } from "lucide-react"
-import type { Member, RecentCheckIn } from "@/lib/mock-api"
 import { useToast } from "@/hooks/use-toast"
 
-function DashboardContent() {
+export default function OwnerDashboard() {
   const router = useRouter()
   const { toast } = useToast()
 
+  // Auth check
+  useEffect(() => {
+    const token = localStorage.getItem("token")
+    if (!token) {
+      router.replace("/login")
+    }
+  }, [router])
+
   // Search and filter states
-  const [firstNameFilter, setFirstNameFilter] = useState("")
-  const [lastNameFilter, setLastNameFilter] = useState("")
-  const [emailFilter, setEmailFilter] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
   const [blockedFilter, setBlockedFilter] = useState<"all" | "blocked" | "active">("all")
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 20
@@ -56,6 +60,8 @@ function DashboardContent() {
   const [membersData, setMembersData] = useState<Member[]>([])
   const [totalMembers, setTotalMembers] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
+  const [stats, setStats] = useState({ total: 0, blocked: 0, active: 0 })
+  const [isLoading, setIsLoading] = useState(false)
 
   // Dialog states
   const [selectedMember, setSelectedMember] = useState<Member | null>(null)
@@ -71,64 +77,82 @@ function DashboardContent() {
     email: "",
   })
 
-  // Recent check-ins
-  const [recentCheckIns, setRecentCheckIns] = useState<RecentCheckIn[]>([])
+  // --- WEBSOCKET FIX START ---
+  const [recentCheckIns, setRecentCheckIns] = useState<CheckInEvent[]>([])
 
-  useEffect(() => {
-    loadMembers()
-    loadRecentCheckIns()
+  // We wrap this in useCallback to prevent infinite connection loops
+  const handleNewCheckIn = useCallback((event: CheckInEvent) => {
+    console.log("[v0] New check-in received:", event)
+    
+    // Use functional update to safely add to list
+    setRecentCheckIns((prev) => [event, ...prev.slice(0, 9)])
 
-    // Simulate WebSocket updates
-    const interval = setInterval(() => {
-      loadRecentCheckIns()
-    }, 5000)
-
-    return () => clearInterval(interval)
-  }, [])
-
-  useEffect(() => {
-    loadMembers()
-  }, [firstNameFilter, lastNameFilter, emailFilter, blockedFilter, currentPage])
-
-  const loadMembers = () => {
-    const blocked = blockedFilter === "blocked" ? true : blockedFilter === "active" ? false : undefined
-
-    const result = members.list({
-      firstName: firstNameFilter,
-      lastName: lastNameFilter,
-      email: emailFilter,
-      blocked,
-      page: currentPage,
-      pageSize,
+    toast({
+      title: event.warning ? "⚠️ Passback Warning" : "✓ New Check-in",
+      description: `${event.member.firstName} ${event.member.lastName} checked in`,
+      variant: event.warning ? "destructive" : "default",
     })
+  }, [toast])
 
-    setMembersData(result.data)
-    setTotalMembers(result.total)
-    setTotalPages(result.totalPages)
-  }
+  // Pass the stable callback to your hook
+  const { isConnected, error: wsError } = useRealtimeCheckIns(handleNewCheckIn)
+  // --- WEBSOCKET FIX END ---
 
-  const loadRecentCheckIns = () => {
-    const checkIns = checkIn.getRecentCheckIns(10)
-    setRecentCheckIns(checkIns)
+  // Load members on change
+  useEffect(() => {
+    loadMembers()
+  }, [searchQuery, blockedFilter, currentPage])
+
+  const loadMembers = async () => {
+    setIsLoading(true)
+    try {
+      const blocked = blockedFilter === "blocked" ? true : blockedFilter === "active" ? false : undefined
+
+      const result = await getMembers(currentPage, searchQuery, blocked || false, pageSize.toString())
+
+      console.log("[v0] Loaded members:", result)
+
+      setMembersData(result.data || [])
+      setTotalMembers(result.total || 0)
+      setTotalPages(result.totalPages || 1)
+
+      // Calculate stats (ideally the API returns this, but calculating client side works for small datasets)
+      // Note: If you have pagination, this stats count is only for the *current page* or requires a separate API call.
+      // For now we trust the result.total if available.
+      setStats({
+        total: result.pagination?.total || result.total || 0,
+        blocked: 0, // Placeholder if API doesn't return count
+        active: 0,  // Placeholder
+      })
+    } catch (error) {
+      console.error("[v0] Failed to load members:", error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to load members",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleSignOut = () => {
-    auth.logout()
+    localStorage.removeItem("token")
     router.push("/")
   }
 
-  const handleCreateMember = () => {
-    try {
-      if (!newMemberForm.firstName || !newMemberForm.lastName || !newMemberForm.email) {
-        toast({
-          title: "Validation error",
-          description: "All fields are required",
-          variant: "destructive",
-        })
-        return
-      }
+  const handleCreateMember = async () => {
+    if (!newMemberForm.firstName || !newMemberForm.lastName || !newMemberForm.email) {
+      toast({
+        title: "Validation error",
+        description: "All fields are required",
+        variant: "destructive",
+      })
+      return
+    }
 
-      members.create({
+    try {
+      await createMember({
         firstName: newMemberForm.firstName,
         lastName: newMemberForm.lastName,
         email: newMemberForm.email,
@@ -152,26 +176,9 @@ function DashboardContent() {
     }
   }
 
-  const handleToggleBlocked = (memberId: string) => {
+  const handleResetQrCode = async (memberId: string) => {
     try {
-      members.toggleBlocked(memberId)
-      toast({
-        title: "Success",
-        description: "Member status updated.",
-      })
-      loadMembers()
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update member status",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const handleResetQrCode = (memberId: string) => {
-    try {
-      members.resetQrCode(memberId)
+      await resetQrCode(memberId)
       toast({
         title: "QR Code reset",
         description: "Member QR code has been regenerated.",
@@ -180,7 +187,7 @@ function DashboardContent() {
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to reset QR code",
+        description: error instanceof Error ? error.message : "Failed to reset QR code",
         variant: "destructive",
       })
     }
@@ -188,7 +195,11 @@ function DashboardContent() {
 
   const handleExportCSV = () => {
     try {
-      const csv = members.exportCSV()
+      const headers = ["firstName", "lastName", "email", "blocked", "emailValid", "createdAt"]
+      const rows = membersData.map((m) => [m.firstName, m.lastName, m.email, m.blocked, m.emailValid, m.createdAt])
+
+      const csv = [headers, ...rows].map((row) => row.map((cell) => `"${cell}"`).join(",")).join("\n")
+
       const blob = new Blob([csv], { type: "text/csv" })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement("a")
@@ -210,7 +221,7 @@ function DashboardContent() {
     }
   }
 
-  const handleImportCSV = () => {
+  const handleImportCSV = async () => {
     if (!csvFile) {
       toast({
         title: "Error",
@@ -221,19 +232,45 @@ function DashboardContent() {
     }
 
     const reader = new FileReader()
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const content = e.target?.result as string
-        const result = members.importCSV(content)
+        const lines = content.trim().split("\n")
+        const headers = lines[0].split(",").map((h) => h.trim().toLowerCase())
+
+        let imported = 0
+        const errors: string[] = []
+
+        for (let i = 1; i < lines.length; i++) {
+          try {
+            const values = lines[i].split(",").map((v) => v.trim().replace(/^"|"$/g, ""))
+            const row: Record<string, string> = {}
+
+            headers.forEach((header, index) => {
+              row[header] = values[index] || ""
+            })
+
+            if (!row.firstname || !row.lastname || !row.email) {
+              errors.push(`Row ${i + 1}: Missing required fields`)
+              continue
+            }
+
+            await createMember({
+              firstName: row.firstname,
+              lastName: row.lastname,
+              email: row.email,
+            })
+
+            imported++
+          } catch (error) {
+            errors.push(`Row ${i + 1}: ${error instanceof Error ? error.message : "Unknown error"}`)
+          }
+        }
 
         toast({
           title: "Import complete",
-          description: `Imported ${result.imported} members${result.errors.length > 0 ? `. ${result.errors.length} errors occurred.` : "."}`,
+          description: `Imported ${imported} members${errors.length > 0 ? `. ${errors.length} errors occurred.` : "."}`,
         })
-
-        if (result.errors.length > 0) {
-          console.log("Import errors:", result.errors)
-        }
 
         setImportDialogOpen(false)
         setCsvFile(null)
@@ -259,6 +296,7 @@ function DashboardContent() {
     const printWindow = window.open("", "_blank")
     if (!printWindow) return
 
+    // Using a public API for QR generation for print view, but you could use your backend too
     const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(member.qrUuid)}`
 
     printWindow.document.write(`
@@ -345,8 +383,7 @@ function DashboardContent() {
         <body>
           <div class="container">
             <div class="logo">
-              <img src="/logo.png" alt="15 Palle Logo" />
-            </div>
+              </div>
             <h1>15 Palle</h1>
             <p class="subtitle">Associazione Sportiva</p>
             
@@ -392,6 +429,8 @@ function DashboardContent() {
             <div>
               <h1 className="mb-2 text-3xl font-bold">Owner Dashboard</h1>
               <p className="text-muted-foreground">Manage club members</p>
+              {wsError && <p className="text-sm text-destructive mt-1">WebSocket: {wsError}</p>}
+              {isConnected && <p className="text-sm text-green-600 mt-1">✓ Real-time updates connected</p>}
             </div>
             <Button variant="outline" onClick={handleSignOut}>
               <LogOut className="mr-2 h-4 w-4" />
@@ -407,7 +446,7 @@ function DashboardContent() {
                 <Users className="h-4 w-4 text-primary" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-primary">{totalMembers}</div>
+                <div className="text-2xl font-bold text-primary">{stats.total}</div>
               </CardContent>
             </Card>
 
@@ -417,7 +456,8 @@ function DashboardContent() {
                 <Users className="h-4 w-4 text-green-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-green-600">{membersData.filter((m) => !m.blocked).length}</div>
+                {/* Fallback to simple calculation if API doesn't return breakdown */}
+                <div className="text-2xl font-bold text-green-600">{membersData.filter(m => !m.blocked).length}</div>
               </CardContent>
             </Card>
 
@@ -427,7 +467,8 @@ function DashboardContent() {
                 <Users className="h-4 w-4 text-red-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-red-600">{membersData.filter((m) => m.blocked).length}</div>
+                 {/* Fallback to simple calculation if API doesn't return breakdown */}
+                <div className="text-2xl font-bold text-red-600">{membersData.filter(m => m.blocked).length}</div>
               </CardContent>
             </Card>
           </div>
@@ -436,7 +477,12 @@ function DashboardContent() {
           <Tabs defaultValue="members" className="space-y-4">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="members">Members</TabsTrigger>
-              <TabsTrigger value="checkins">Recent Check-ins</TabsTrigger>
+              <TabsTrigger value="checkins">
+                Recent Check-ins
+                {recentCheckIns.length > 0 && (
+                  <Badge className="ml-2 bg-primary text-primary-foreground">{recentCheckIns.length}</Badge>
+                )}
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="members" className="space-y-4">
@@ -467,39 +513,15 @@ function DashboardContent() {
                 <CardContent className="space-y-6">
                   {/* Filters */}
                   <div className="space-y-4">
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
-                        <Label htmlFor="firstName">First Name</Label>
+                        <Label htmlFor="search">Search</Label>
                         <Input
-                          id="firstName"
-                          placeholder="Filter by first name..."
-                          value={firstNameFilter}
+                          id="search"
+                          placeholder="Search by name or email..."
+                          value={searchQuery}
                           onChange={(e) => {
-                            setFirstNameFilter(e.target.value)
-                            setCurrentPage(1)
-                          }}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="lastName">Last Name</Label>
-                        <Input
-                          id="lastName"
-                          placeholder="Filter by last name..."
-                          value={lastNameFilter}
-                          onChange={(e) => {
-                            setLastNameFilter(e.target.value)
-                            setCurrentPage(1)
-                          }}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="email">Email</Label>
-                        <Input
-                          id="email"
-                          placeholder="Filter by email..."
-                          value={emailFilter}
-                          onChange={(e) => {
-                            setEmailFilter(e.target.value)
+                            setSearchQuery(e.target.value)
                             setCurrentPage(1)
                           }}
                         />
@@ -524,92 +546,109 @@ function DashboardContent() {
                   </div>
 
                   {/* Table */}
-                  <div className="overflow-x-auto rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Name</TableHead>
-                          <TableHead className="hidden sm:table-cell">Email</TableHead>
-                          <TableHead className="hidden md:table-cell">Created</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {membersData.map((member) => (
-                          <TableRow key={member._id}>
-                            <TableCell className="font-medium">
-                              {member.firstName} {member.lastName}
-                            </TableCell>
-                            <TableCell className="hidden sm:table-cell">{member.email}</TableCell>
-                            <TableCell className="hidden md:table-cell">
-                              {new Date(member.createdAt).toLocaleDateString()}
-                            </TableCell>
-                            <TableCell>
-                              {member.blocked ? (
-                                <Badge variant="destructive">Blocked</Badge>
-                              ) : (
-                                <Badge className="bg-green-600 hover:bg-green-700">Active</Badge>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-2">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleViewMember(member)}
-                                  title="View details"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handlePrintQR(member)}
-                                  title="Print QR code"
-                                >
-                                  <Printer className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleToggleBlocked(member._id!)}
-                                  title={member.blocked ? "Unblock member" : "Block member"}
-                                >
-                                  {member.blocked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-                                </Button>
-                              </div>
-                            </TableCell>
+                  {isLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <div className="text-muted-foreground">Loading members...</div>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead className="hidden sm:table-cell">Email</TableHead>
+                            <TableHead className="hidden md:table-cell">Created</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {membersData.map((member) => (
+                            <TableRow key={member._id}>
+                              <TableCell className="font-medium">
+                                {member.firstName} {member.lastName}
+                              </TableCell>
+                              <TableCell className="hidden sm:table-cell">{member.email}</TableCell>
+                              <TableCell className="hidden md:table-cell">
+                                {new Date(member.createdAt).toLocaleDateString()}
+                              </TableCell>
+                              <TableCell>
+                                {member.blocked ? (
+                                  <Badge variant="destructive">Blocked</Badge>
+                                ) : member.emailValid ? (
+                                  <Badge className="bg-green-600 hover:bg-green-700">Active</Badge>
+                                ) : (
+                                  <Badge variant="secondary">Pending</Badge>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex justify-end gap-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleViewMember(member)}
+                                    title="View details"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handlePrintQR(member)}
+                                    title="Print QR code"
+                                  >
+                                    <Printer className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleResetQrCode(member._id)}
+                                    title="Reset QR code"
+                                  >
+                                    <RotateCcw className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          {membersData.length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                                No members found
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
 
                   {/* Pagination */}
-                  <div className="flex items-center justify-between pt-4">
-                    <div className="text-sm text-muted-foreground">
-                      Page {currentPage} of {totalPages || 1} ({totalMembers} total)
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">
+                        Page {currentPage} of {totalPages} ({totalMembers} total members)
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                          disabled={currentPage === 1}
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                          disabled={currentPage === totalPages}
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                        disabled={currentPage === 1}
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                        disabled={currentPage === totalPages}
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -618,24 +657,48 @@ function DashboardContent() {
               <Card>
                 <CardHeader>
                   <CardTitle>Recent Check-ins</CardTitle>
-                  <CardDescription>Members who recently scanned their QR code</CardDescription>
+                  <CardDescription>Real-time check-ins via WebSocket</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {recentCheckIns.length === 0 ? (
-                    <div className="py-12 text-center">
-                      <AlertCircle className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
                       <p className="text-muted-foreground">No recent check-ins</p>
+                      <p className="text-sm text-muted-foreground mt-2">
+                        Check-ins will appear here in real-time when members scan their QR codes
+                      </p>
                     </div>
                   ) : (
                     <div className="space-y-4">
                       {recentCheckIns.map((checkIn, index) => (
-                        <div key={index} className="flex items-center justify-between rounded-lg border p-4">
-                          <div>
-                            <p className="font-medium">{checkIn.memberName}</p>
-                            <p className="text-sm text-muted-foreground">{checkIn.memberEmail}</p>
+                        <div
+                          key={index}
+                          className={`flex items-center justify-between rounded-lg border p-4 ${
+                            checkIn.warning ? "border-red-300 bg-red-50" : "border-border bg-background"
+                          }`}
+                        >
+                          <div className="flex items-center gap-4">
+                            <div
+                              className={`flex h-10 w-10 items-center justify-center rounded-full ${
+                                checkIn.warning ? "bg-red-600" : "bg-primary"
+                              } text-white`}
+                            >
+                              {checkIn.warning ? "⚠" : "✓"}
+                            </div>
+                            <div>
+                              <p className="font-semibold">
+                                {checkIn.member.firstName} {checkIn.member.lastName}
+                              </p>
+                              <p className="text-sm text-muted-foreground">{checkIn.member.email}</p>
+                              {checkIn.warning && (
+                                <p className="text-sm text-red-600 font-medium mt-1">{checkIn.warning}</p>
+                              )}
+                            </div>
                           </div>
                           <div className="text-right">
-                            <p className="text-sm font-medium">{new Date(checkIn.timestamp).toLocaleTimeString()}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {new Date(checkIn.timestamp).toLocaleTimeString()}
+                            </p>
                             <p className="text-xs text-muted-foreground">
                               {new Date(checkIn.timestamp).toLocaleDateString()}
                             </p>
@@ -651,40 +714,42 @@ function DashboardContent() {
         </div>
       </main>
 
+      <Footer />
+
       {/* Create Member Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add New Member</DialogTitle>
-            <DialogDescription>Create a new club member account</DialogDescription>
+            <DialogTitle>Create New Member</DialogTitle>
+            <DialogDescription>Add a new member to the club</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="firstName">First Name</Label>
+              <Label htmlFor="new-firstName">First Name</Label>
               <Input
-                id="firstName"
+                id="new-firstName"
                 value={newMemberForm.firstName}
                 onChange={(e) => setNewMemberForm({ ...newMemberForm, firstName: e.target.value })}
-                placeholder="Enter first name"
+                placeholder="John"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="lastName">Last Name</Label>
+              <Label htmlFor="new-lastName">Last Name</Label>
               <Input
-                id="lastName"
+                id="new-lastName"
                 value={newMemberForm.lastName}
                 onChange={(e) => setNewMemberForm({ ...newMemberForm, lastName: e.target.value })}
-                placeholder="Enter last name"
+                placeholder="Doe"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="new-email">Email</Label>
               <Input
-                id="email"
+                id="new-email"
                 type="email"
                 value={newMemberForm.email}
                 onChange={(e) => setNewMemberForm({ ...newMemberForm, email: e.target.value })}
-                placeholder="Enter email address"
+                placeholder="john.doe@example.com"
               />
             </div>
           </div>
@@ -702,16 +767,10 @@ function DashboardContent() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Import Members from CSV</DialogTitle>
-            <DialogDescription>Upload a CSV file with firstName, lastName, and email columns</DialogDescription>
+            <DialogDescription>Upload a CSV file with columns: firstName, lastName, email</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <Input
-              type="file"
-              accept=".csv"
-              onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
-              className="cursor-pointer"
-            />
-            <p className="text-xs text-muted-foreground">CSV format: firstName,lastName,email</p>
+          <div className="space-y-4 py-4">
+            <Input type="file" accept=".csv" onChange={(e) => setCsvFile(e.target.files?.[0] || null)} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
@@ -724,100 +783,89 @@ function DashboardContent() {
         </DialogContent>
       </Dialog>
 
-      {/* Member Details Sheet */}
+      {/* Member Details Drawer */}
       <Sheet open={detailsDrawerOpen} onOpenChange={setDetailsDrawerOpen}>
-        <SheetContent>
+        <SheetContent className="w-full sm:max-w-md overflow-y-auto p-6">
           <SheetHeader>
             <SheetTitle>Member Details</SheetTitle>
-            <SheetDescription>
-              {selectedMember?.firstName} {selectedMember?.lastName}
-            </SheetDescription>
+            <SheetDescription>View and manage member information</SheetDescription>
           </SheetHeader>
-
           {selectedMember && (
-            <div className="space-y-6 py-4">
-              <div className="space-y-4 rounded-lg bg-muted p-4">
-                <div>
-                  <Label className="text-xs text-muted-foreground">First Name</Label>
-                  <p className="font-medium">{selectedMember.firstName}</p>
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Last Name</Label>
-                  <p className="font-medium">{selectedMember.lastName}</p>
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Email</Label>
-                  <p className="font-medium break-all">{selectedMember.email}</p>
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Member ID</Label>
-                  <p className="font-mono text-sm">{selectedMember._id}</p>
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Created</Label>
-                  <p className="font-medium">{new Date(selectedMember.createdAt).toLocaleDateString()}</p>
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Status</Label>
-                  <p className="font-medium">
-                    {selectedMember.blocked ? (
-                      <Badge variant="destructive">Blocked</Badge>
-                    ) : (
-                      <Badge className="bg-green-600">Active</Badge>
-                    )}
+            <div className="mt-6 space-y-6">
+              <div className="space-y-4">
+                <Card className="px-4 py-3">
+                  <h3 className="mb-3 text-sm font-semibold">Personal Information</h3>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Name:</span>
+                      <span className="font-medium">
+                        {selectedMember.firstName} {selectedMember.lastName}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Email:</span>
+                      <span className="font-medium">{selectedMember.email}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Member ID:</span>
+                      <span className="font-mono text-xs">{selectedMember._id}</span>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="px-4 py-3">
+                  <h3 className="mb-3 text-sm font-semibold">Account Status</h3>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Status:</span>
+                      {selectedMember.blocked ? (
+                        <Badge variant="destructive">Blocked</Badge>
+                      ) : selectedMember.emailValid ? (
+                        <Badge className="bg-green-600">Active</Badge>
+                      ) : (
+                        <Badge variant="secondary">Pending</Badge>
+                      )}
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Email Verified:</span>
+                      <span className="font-medium">{selectedMember.emailValid ? "Yes" : "No"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Created:</span>
+                      <span className="font-medium">{new Date(selectedMember.createdAt).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="px-4 py-3">
+                  <h3 className="mb-3 text-sm font-semibold">QR Code</h3>
+                  <div className="flex justify-center py-4">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(selectedMember.qrUuid)}`}
+                      alt="Member QR Code"
+                      className="rounded-lg border-2 border-primary"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground text-center mt-2">
+                    QR UUID: {selectedMember.qrUuid.substring(0, 8)}...
                   </p>
-                </div>
+                </Card>
               </div>
 
-              <div className="space-y-2">
-                <Button
-                  variant="outline"
-                  className="w-full justify-start bg-transparent"
-                  onClick={() => handleResetQrCode(selectedMember._id!)}
-                >
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                  Reset QR Code
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full justify-start bg-transparent"
-                  onClick={() => handlePrintQR(selectedMember)}
-                >
+              <div className="flex flex-col gap-2">
+                <Button onClick={() => handlePrintQR(selectedMember)} className="w-full">
                   <Printer className="mr-2 h-4 w-4" />
                   Print QR Code
                 </Button>
-                <Button
-                  variant="outline"
-                  className="w-full justify-start bg-transparent"
-                  onClick={() => handleToggleBlocked(selectedMember._id!)}
-                >
-                  {selectedMember.blocked ? (
-                    <>
-                      <Unlock className="mr-2 h-4 w-4" />
-                      Unblock Member
-                    </>
-                  ) : (
-                    <>
-                      <Lock className="mr-2 h-4 w-4" />
-                      Block Member
-                    </>
-                  )}
+                <Button variant="outline" onClick={() => handleResetQrCode(selectedMember._id)} className="w-full">
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Reset QR Code
                 </Button>
               </div>
             </div>
           )}
         </SheetContent>
       </Sheet>
-
-      <Footer />
     </div>
-  )
-}
-
-export default function OwnerDashboardPage() {
-  return (
-    <RequireRole role="owner">
-      <DashboardContent />
-    </RequireRole>
   )
 }

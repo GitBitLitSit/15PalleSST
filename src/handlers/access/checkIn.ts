@@ -124,7 +124,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             })
         };
     } catch (error) {
-        const isJwtError = error instanceof Error && error.message.includes("jwt");
+        const isJwtError = error instanceof Error && error.message.includes("JWT");
         return {
             statusCode: isJwtError ? 401 : 500,
             body: JSON.stringify({ 

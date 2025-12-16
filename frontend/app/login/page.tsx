@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
@@ -9,11 +8,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { auth } from "@/lib/mock-api"
+import { loginAdmin, requestVerificationCode, verifyAndRecover } from "@/lib/api"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { LogIn, Mail, ShieldCheck, Lock, Info, User } from "lucide-react"
-import Link from "next/link"
+import { LogIn, Mail, ShieldCheck, Lock, User } from "lucide-react"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -24,7 +22,7 @@ export default function LoginPage() {
   const [customerEmail, setCustomerEmail] = useState("")
   const [verificationCode, setVerificationCode] = useState("")
   const [step, setStep] = useState<"email" | "code">("email")
-  const [generatedCode, setGeneratedCode] = useState<string | null>(null)
+  const [displayedCode, setDisplayedCode] = useState<string | null>(null)
 
   // Owner login states
   const [ownerUsername, setOwnerUsername] = useState("")
@@ -42,8 +40,14 @@ export default function LoginPage() {
     }
 
     try {
-      const result = await auth.sendVerificationCode(customerEmail)
-      setGeneratedCode(result.code)
+      const result = await requestVerificationCode(customerEmail)
+      console.log("[v0] Verification code requested:", result)
+
+      // If backend returns code for display mode
+      if (result.verificationCode) {
+        setDisplayedCode(result.verificationCode)
+      }
+
       setStep("code")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send verification code")
@@ -64,7 +68,19 @@ export default function LoginPage() {
     }
 
     try {
-      await auth.verifyCode(customerEmail, verificationCode)
+      const result = await verifyAndRecover({
+        email: customerEmail,
+        verificationCode,
+        deliveryMethod: "display",
+      })
+
+      console.log("[v0] Verification successful:", result)
+
+      // Store member data in localStorage
+      if (result.member) {
+        localStorage.setItem("currentMember", JSON.stringify(result.member))
+      }
+
       router.push("/customer/profile")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid verification code")
@@ -79,7 +95,18 @@ export default function LoginPage() {
     setError(null)
 
     try {
-      await auth.loginOwner(ownerUsername, ownerPassword)
+      const result = await loginAdmin({
+        username: ownerUsername,
+        password: ownerPassword,
+      })
+
+      console.log("[v0] Admin login successful:", result)
+
+      // Store JWT token
+      if (result.token) {
+        localStorage.setItem("token", result.token)
+      }
+
       router.push("/owner/dashboard")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid credentials")
@@ -91,7 +118,7 @@ export default function LoginPage() {
   const handleBackToEmail = () => {
     setStep("email")
     setVerificationCode("")
-    setGeneratedCode(null)
+    setDisplayedCode(null)
     setError(null)
   }
 
@@ -107,37 +134,6 @@ export default function LoginPage() {
               <h1 className="mb-2 text-3xl font-bold text-balance">Welcome to 15 Palle</h1>
               <p className="text-muted-foreground">Sign in to access your account</p>
             </div>
-
-            <Card className="mb-6 border-primary/20 bg-primary/5">
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-2">
-                  <Info className="h-5 w-5 text-primary" />
-                  <CardTitle className="text-base">Demo Credentials</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div>
-                  <p className="font-semibold text-primary mb-1">Owner Login:</p>
-                  <p className="text-muted-foreground">
-                    Username: <span className="font-mono bg-background px-2 py-0.5 rounded">admin</span>
-                  </p>
-                  <p className="text-muted-foreground">
-                    Password: <span className="font-mono bg-background px-2 py-0.5 rounded">admin123</span>
-                  </p>
-                </div>
-                <div>
-                  <p className="font-semibold text-primary mb-1">Customer Login (use any of these emails):</p>
-                  <ul className="space-y-1 text-muted-foreground">
-                    <li className="font-mono text-xs bg-background px-2 py-1 rounded">marco.rossi@example.com</li>
-                    <li className="font-mono text-xs bg-background px-2 py-1 rounded">giulia.bianchi@example.com</li>
-                    <li className="font-mono text-xs bg-background px-2 py-1 rounded">luca.ferrari@example.com</li>
-                  </ul>
-                  <p className="text-xs text-muted-foreground mt-2 italic">
-                    Verification code will be displayed on screen
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
 
             <Card className="shadow-lg">
               <CardHeader>
@@ -203,14 +199,14 @@ export default function LoginPage() {
                           </p>
                         </div>
 
-                        {generatedCode && (
+                        {displayedCode && (
                           <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
                             <p className="text-sm font-medium text-primary mb-1">Your verification code:</p>
                             <p className="text-2xl font-bold text-center tracking-widest text-primary">
-                              {generatedCode}
+                              {displayedCode}
                             </p>
                             <p className="text-xs text-muted-foreground text-center mt-2">
-                              (Demo mode - code displayed here)
+                              (Display mode - code shown here)
                             </p>
                           </div>
                         )}
@@ -284,15 +280,6 @@ export default function LoginPage() {
                     </form>
                   </TabsContent>
                 </Tabs>
-
-                <div className="mt-6 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    Don't have an account?{" "}
-                    <Link href="/register" className="font-medium text-primary hover:underline">
-                      Register here
-                    </Link>
-                  </p>
-                </div>
               </CardContent>
             </Card>
           </div>

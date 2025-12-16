@@ -7,22 +7,35 @@ import { Button } from "@/components/ui/button"
 import { Menu, LogOut } from "lucide-react"
 import { useState, useEffect } from "react"
 import { cn } from "@/lib/utils"
-import { me } from "@/lib/mock-api"
-import type { AuthUser } from "@/lib/mock-api"
 
 export function Navigation() {
   const pathname = usePathname()
   const router = useRouter()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [user, setUser] = useState<AuthUser | null>(null)
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [userType, setUserType] = useState<"customer" | "owner" | null>(null)
 
   useEffect(() => {
-    setUser(me.get())
+    const token = localStorage.getItem("token")
+    const memberData = localStorage.getItem("currentMember")
+
+    if (token) {
+      setIsLoggedIn(true)
+      setUserType("owner")
+    } else if (memberData) {
+      setIsLoggedIn(true)
+      setUserType("customer")
+    } else {
+      setIsLoggedIn(false)
+      setUserType(null)
+    }
   }, [pathname])
 
   const handleLogout = () => {
-    me.clear()
-    setUser(null)
+    localStorage.removeItem("token")
+    localStorage.removeItem("currentMember")
+    setIsLoggedIn(false)
+    setUserType(null)
     router.push("/")
   }
 
@@ -33,15 +46,15 @@ export function Navigation() {
       { href: "/contact", label: "Contact" },
     ]
 
-    if (!user) {
+    if (!isLoggedIn) {
       return [...baseItems, { href: "/login", label: "Login" }]
     }
 
-    if (user.role === "customer") {
+    if (userType === "customer") {
       return [...baseItems, { href: "/customer/profile", label: "My Profile" }]
     }
 
-    if (user.role === "owner") {
+    if (userType === "owner") {
       return [...baseItems, { href: "/owner/dashboard", label: "Dashboard" }]
     }
 
@@ -73,7 +86,7 @@ export function Navigation() {
                 {item.label}
               </Link>
             ))}
-            {user && (
+            {isLoggedIn && (
               <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2">
                 <LogOut className="h-4 w-4" />
                 Logout
@@ -105,7 +118,7 @@ export function Navigation() {
                   {item.label}
                 </Link>
               ))}
-              {user && (
+              {isLoggedIn && (
                 <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2 justify-start">
                   <LogOut className="h-4 w-4" />
                   Logout

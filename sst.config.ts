@@ -82,8 +82,8 @@ export default $config({
       ]
     });
 
-    api.route("POST /auth/request-code", {
-      handler: "./src/handlers/auth/requestCode.handler",
+    api.route("POST /auth/request-verification", {
+      handler: "./src/handlers/auth/requestVerification.handler",
       environment: {
         MONGODB_URI: process.env.MONGODB_URI!,
         MONGODB_DB_NAME: process.env.MONGODB_DB_NAME!,
@@ -133,7 +133,7 @@ export default $config({
         }
        ]
     })
-
+    
     const site = new sst.aws.Nextjs("MyWeb", {
       path: "frontend",
       environment: {

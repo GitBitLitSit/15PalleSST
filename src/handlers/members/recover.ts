@@ -71,7 +71,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             responseBody = {
                 success: true,
                 message: "Code verified successfully.",
-                qrImage: qrImage
+                qrImage: qrImage,
+                member: memberRecord
             }
         }
 

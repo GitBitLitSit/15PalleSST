@@ -1,8 +1,9 @@
 import { APIGatewayProxyHandlerV2 } from "aws-lambda";
 import { connectToMongo } from "../../adapters/database";
+import { WebSocketRequestContext } from "./types";
 
-export const disconnect: APIGatewayProxyHandlerV2 = async (event) => {
-    const connectionId = event.requestContext.accountId;
+export const handler: APIGatewayProxyHandlerV2 = async (event) => {
+    const connectionId = (event.requestContext as WebSocketRequestContext).connectionId;
 
     const db = await connectToMongo();
     await db.collection("connections").deleteOne({ connectionId });

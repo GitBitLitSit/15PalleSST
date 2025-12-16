@@ -1,35 +1,33 @@
 "use client"
 
-import { RequireRole } from "@/components/require-role"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { me, members, auth } from "@/lib/mock-api"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { User, Mail, Calendar, LogOut, Maximize2, Minimize2 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
-import type { Member } from "@/lib/mock-api"
+import type { Member } from "@/lib/types"
 
-function ProfileContent() {
+export default function CustomerProfilePage() {
   const router = useRouter()
   const [member, setMember] = useState<Member | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
 
   useEffect(() => {
-    const user = me.get()
-    if (user) {
-      const memberData = members.getById(user.id)
-      if (memberData) {
-        setMember(memberData)
-      }
+    const memberData = localStorage.getItem("currentMember")
+    if (memberData) {
+      setMember(JSON.parse(memberData))
+    } else {
+      // Redirect to login if no member data found
+      router.replace("/login")
     }
-  }, [])
+  }, [router])
 
   const handleSignOut = () => {
-    auth.logout()
+    localStorage.removeItem("currentMember")
     router.push("/")
   }
 
@@ -106,14 +104,16 @@ function ProfileContent() {
                     <p className="text-xs text-muted-foreground">Status</p>
                     {member.blocked ? (
                       <Badge variant="destructive">Account Blocked</Badge>
-                    ) : (
+                    ) : member.emailValid ? (
                       <Badge className="bg-green-600 hover:bg-green-700">Active Member</Badge>
+                    ) : (
+                      <Badge variant="secondary">Pending Verification</Badge>
                     )}
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Show QR Code */}
+              {/* QR Code */}
               <Card className={isFullscreen ? "fixed inset-0 z-50 rounded-none" : ""}>
                 <CardHeader>
                   <div className="flex items-center justify-between">
@@ -151,7 +151,11 @@ function ProfileContent() {
                     </div>
 
                     <div>
-                      {!member.blocked && (
+                      {member.blocked ? (
+                        <Badge variant="destructive" className="text-lg px-4 py-2">
+                          ⚠ Account Blocked
+                        </Badge>
+                      ) : (
                         <Badge className="bg-green-600 hover:bg-green-700 text-lg px-4 py-2">✓ Active Member</Badge>
                       )}
                     </div>
@@ -165,13 +169,5 @@ function ProfileContent() {
 
       <Footer />
     </div>
-  )
-}
-
-export default function CustomerProfilePage() {
-  return (
-    <RequireRole role="customer">
-      <ProfileContent />
-    </RequireRole>
   )
 }
