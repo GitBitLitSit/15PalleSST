@@ -14,7 +14,7 @@ export interface CheckIn {
     memberId: string;
     checkInTime: Date;
     source: "raspberry_pi" | "admin" | "unknown";
-    passbackWarning: boolean;
+    warning?: string | null;
 }
 
 export interface WebSocketConnection {

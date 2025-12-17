@@ -482,41 +482,48 @@ export default function OwnerDashboard() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {checkInsData.map((checkIn: CheckInEvent, index) => (
-                        <div
-                          key={index}
-                          className={`flex items-center justify-between rounded-lg border p-4 ${
-                            checkIn.warning ? "border-red-300 bg-red-50" : "border-border bg-background"
-                          }`}
-                        >
-                          <div className="flex items-center gap-4">
-                            <div className={`flex h-10 w-10 items-center justify-center rounded-full ${
-                                checkIn.warning ? "bg-red-600" : "bg-primary"
-                              } text-white`}>
-                              {checkIn.warning ? "⚠" : "✓"}
+                      {checkInsData.map((checkIn: CheckInEvent, index) => {
+                        const hasWarning = checkIn.warning;
+                        const warningMessage = checkIn.warning;
+
+                        console.log("Rendering check-in:", checkIn);
+
+                        return (
+                          <div
+                            key={index}
+                            className={`flex items-center justify-between rounded-lg border p-4 ${
+                              hasWarning ? "border-red-300 bg-red-50" : "border-border bg-background"
+                            }`}
+                          >
+                            <div className="flex items-center gap-4">
+                              <div className={`flex h-10 w-10 items-center justify-center rounded-full ${
+                                  hasWarning ? "bg-red-600" : "bg-primary"
+                                } text-white`}>
+                                {hasWarning ? "⚠" : "✓"}
+                              </div>
+                              <div>
+                                <p className="font-semibold">
+                                  {checkIn.member ? `${checkIn.member.firstName} ${checkIn.member.lastName}` : "Unknown Member"}
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                  {checkIn.member?.email || "No email"}
+                                </p>
+                                {warningMessage && (
+                                  <p className="text-sm text-red-600 font-medium mt-1">{warningMessage}</p>
+                                )}
+                              </div>
                             </div>
-                            <div>
-                              <p className="font-semibold">
-                                {checkIn.member ? `${checkIn.member.firstName} ${checkIn.member.lastName}` : "Unknown Member"}
-                              </p>
+                            <div className="text-right">
                               <p className="text-sm text-muted-foreground">
-                                {checkIn.member?.email || "No email"}
+                                {new Date(checkIn.timestamp|| Date.now()).toLocaleTimeString()}
                               </p>
-                              {checkIn.warning && (
-                                <p className="text-sm text-red-600 font-medium mt-1">{checkIn.warning}</p>
-                              )}
+                              <p className="text-xs text-muted-foreground">
+                                {new Date(checkIn.timestamp || Date.now()).toLocaleDateString()}
+                              </p>
                             </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-sm text-muted-foreground">
-                              {new Date(checkIn.timestamp || Date.now()).toLocaleTimeString()}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {new Date(checkIn.timestamp || Date.now()).toLocaleDateString()}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
 

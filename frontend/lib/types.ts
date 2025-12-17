@@ -12,7 +12,7 @@ export interface Member {
 export interface CheckInEvent {
   type: "NEW_CHECKIN"
   member: Member
-  warning?: string | null // e.g., "Passback Warning"
+  warning?: string | null
   timestamp: string
 }
 

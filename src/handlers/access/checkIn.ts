@@ -78,7 +78,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             const diffMinutes = diffMs / 1000 / 60;
 
             if (diffMinutes < COOLDOWN_MINUTES) {
-                warning = `Passback Warning: Last scan was ${Math.round(diffMinutes)} minutes ago.`;
+                warning = `Last scan was ${Math.round(diffMinutes)} minutes ago.`;
             }
         }
 
@@ -86,7 +86,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             memberId: member._id,
             checkInTime: now,
             source: authSource,
-            passbackWarning: !!warning
+            warning: warning
         });
 
         try {

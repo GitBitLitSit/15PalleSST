@@ -23,7 +23,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         const total = await collection.countDocuments();
 
         const checkIns = await collection.aggregate([
-            { $sort: { createdAt: -1 } },
+            { $sort: { checkInTime: -1 } },
             { $skip: skip },
             { $limit: limit },
             {

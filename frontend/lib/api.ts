@@ -77,7 +77,6 @@ export async function verifyAndRecover(data: {
 }
 
 export async function getCheckIns(page = 1, limit = 50) {
-  const token = localStorage.getItem("token")
   const res = await fetch(`${API_URL}/auth/check-ins?page=${page}&limit=${limit}`, {
     method: "GET",
     headers: getAuthHeaders(),
