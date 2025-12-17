@@ -844,7 +844,6 @@ export default function OwnerDashboard() {
                     <img
                       src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(selectedMember.qrUuid)}`}
                       alt="Member QR Code"
-                      className="rounded-lg border-2 border-primary"
                     />
                   </div>
                   <p className="text-xs text-muted-foreground text-center mt-2">
