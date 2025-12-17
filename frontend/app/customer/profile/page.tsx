@@ -54,10 +54,6 @@ export default function CustomerProfilePage() {
                 <h1 className="mb-2 text-3xl font-bold">My Profile</h1>
                 <p className="text-muted-foreground">Your membership information</p>
               </div>
-              <Button variant="outline" onClick={handleSignOut}>
-                <LogOut className="mr-2 h-4 w-4" />
-                Sign Out
-              </Button>
             </div>
 
             <div className="grid gap-6 lg:grid-cols-2">

@@ -432,10 +432,6 @@ export default function OwnerDashboard() {
               {wsError && <p className="text-sm text-destructive mt-1">WebSocket: {wsError}</p>}
               {isConnected && <p className="text-sm text-green-600 mt-1">✓ Real-time updates connected</p>}
             </div>
-            <Button variant="outline" onClick={handleSignOut}>
-              <LogOut className="mr-2 h-4 w-4" />
-              Sign Out
-            </Button>
           </div>
 
           {/* Stats */}
