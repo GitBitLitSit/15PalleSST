@@ -66,7 +66,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
         const lastCheckin = await checkinsCollection.findOne(
             { memberId: member._id },
-            { sort: { checkinTime: -1 } }
+            { sort: { checkInTime: -1 } }
         );
 
         const now = new Date();

@@ -16,24 +16,6 @@ export default $config({
   async run() {
     const api = new sst.aws.ApiGatewayV2("Api");
 
-    api.route("POST /members", {
-      handler: "./src/handlers/members/create.handler",
-      environment: {
-        JWT_SECRET_KEY: process.env.JWT_SECRET_KEY!,
-        MONGODB_URI: process.env.MONGODB_URI!,
-        MONGODB_DB_NAME: process.env.MONGODB_DB_NAME!,
-        SES_SENDER_EMAIL: process.env.SES_SENDER_EMAIL!,
-      },
-      architecture: "arm64",
-      runtime: "nodejs22.x",
-      permissions: [
-        {
-          actions: ["ses:SendEmail", "ses:SendRawEmail"],
-          resources: ["*"] 
-        }
-      ]
-    });
-
     api.route("POST /admin/login", {
       handler: "./src/handlers/admin/login.handler",
       environment: {
@@ -57,6 +39,24 @@ export default $config({
       architecture: "arm64",
       runtime: "nodejs22.x",
     })
+
+    api.route("POST /members", {
+      handler: "./src/handlers/members/create.handler",
+      environment: {
+        JWT_SECRET_KEY: process.env.JWT_SECRET_KEY!,
+        MONGODB_URI: process.env.MONGODB_URI!,
+        MONGODB_DB_NAME: process.env.MONGODB_DB_NAME!,
+        SES_SENDER_EMAIL: process.env.SES_SENDER_EMAIL!,
+      },
+      architecture: "arm64",
+      runtime: "nodejs22.x",
+      permissions: [
+        {
+          actions: ["ses:SendEmail", "ses:SendRawEmail"],
+          resources: ["*"] 
+        }
+      ]
+    });
 
     api.route("POST /members/reset-qrcode", {
       handler: "./src/handlers/members/resetQrCode.handler",
@@ -82,6 +82,17 @@ export default $config({
           resources: ["*"]
         }
       ]
+    });
+
+    api.route("GET /auth/check-ins", {
+      handler: "./src/handlers/access/get.handler",
+      environment: {
+        JWT_SECRET_KEY: process.env.JWT_SECRET_KEY!,
+        MONGODB_URI: process.env.MONGODB_URI!,
+        MONGODB_DB_NAME: process.env.MONGODB_DB_NAME!,
+      },
+      architecture: "arm64",
+      runtime: "nodejs22.x",
     });
 
     api.route("POST /auth/request-verification", {

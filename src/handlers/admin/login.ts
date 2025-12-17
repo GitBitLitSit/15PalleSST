@@ -42,7 +42,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     const admin = await adminsCollection.findOne({ username });
 
     const handleFailure = async () => {
-        console.log("Handling failed login attempt", ipRecord);
         const newAttempts = (ipRecord?.attempts || 0) + 1;
         let updateData: any = { attempts: newAttempts, ip };
 
@@ -60,14 +59,12 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     }
 
     if (!admin) {
-        console.log("Admin not found");
         return handleFailure();
     }
 
     const isPasswordValid = await bcrypt.compare(password, admin.password);
 
     if (!isPasswordValid) {
-        console.log("Invalid password");
         return handleFailure();
     }
 

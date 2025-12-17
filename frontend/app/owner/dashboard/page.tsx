@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
@@ -20,7 +20,8 @@ import {
 } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Label } from "@/components/ui/label"
-import { getMembers, createMember, resetQrCode } from "@/lib/api"
+// FIX: Added getCheckIns to imports
+import { getMembers, createMember, resetQrCode, getCheckIns } from "@/lib/api"
 import { useRealtimeCheckIns } from "@/hooks/use-realtime"
 import type { Member, CheckInEvent } from "@/lib/types"
 import {
@@ -49,94 +50,143 @@ export default function OwnerDashboard() {
     }
   }, [router])
 
-  // Search and filter states
+  // --- UI STATE ---
+  // Track which tab is active to manage notifications
+  const [activeTab, setActiveTab] = useState("members")
+
+  // --- MEMBERS STATE ---
   const [searchQuery, setSearchQuery] = useState("")
   const [blockedFilter, setBlockedFilter] = useState<"all" | "blocked" | "active">("all")
-  const [currentPage, setCurrentPage] = useState(1)
-  const pageSize = 20
-
-  // Members state
+  const [membersPage, setMembersPage] = useState(1)
   const [membersData, setMembersData] = useState<Member[]>([])
   const [totalMembers, setTotalMembers] = useState(0)
-  const [totalPages, setTotalPages] = useState(0)
-  const [stats, setStats] = useState({ total: 0, blocked: 0, active: 0 })
-  const [isLoading, setIsLoading] = useState(false)
+  const [totalMembersPages, setTotalMembersPages] = useState(0)
+  const [isMembersLoading, setIsMembersLoading] = useState(false)
+  const membersPageSize = 20
 
-  // Dialog states
+  // --- CHECK-INS STATE (NEW) ---
+  const [checkInsData, setCheckInsData] = useState<CheckInEvent[]>([])
+  const [checkInsPage, setCheckInsPage] = useState(1)
+  const [totalCheckIns, setTotalCheckIns] = useState(0)
+  const [totalCheckInsPages, setTotalCheckInsPages] = useState(0)
+  const [isCheckInsLoading, setIsCheckInsLoading] = useState(false)
+  const [unreadCheckInsCount, setUnreadCheckInsCount] = useState(0)
+  const checkInsPageSize = 20
+
+  // --- REFS FOR WEBSOCKET CLOSURE ---
+  // We use refs to access the *current* state inside the WebSocket callback
+  // without triggering a re-connection every time the state changes.
+  const activeTabRef = useRef(activeTab)
+  const checkInsPageRef = useRef(checkInsPage)
+
+  useEffect(() => { activeTabRef.current = activeTab }, [activeTab])
+  useEffect(() => { checkInsPageRef.current = checkInsPage }, [checkInsPage])
+
+  // --- DIALOGS & FORMS ---
   const [selectedMember, setSelectedMember] = useState<Member | null>(null)
   const [detailsDrawerOpen, setDetailsDrawerOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [csvFile, setCsvFile] = useState<File | null>(null)
-
   const [isCreating, setIsCreating] = useState(false)
+  const [newMemberForm, setNewMemberForm] = useState({ firstName: "", lastName: "", email: "" })
+  const [stats, setStats] = useState({ total: 0, blocked: 0, active: 0 })
 
-  // Create member form
-  const [newMemberForm, setNewMemberForm] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-  })
-
-  // --- WEBSOCKET FIX START ---
-  const [recentCheckIns, setRecentCheckIns] = useState<CheckInEvent[]>([])
-
-  // We wrap this in useCallback to prevent infinite connection loops
+  // --- WEBSOCKET HANDLER ---
   const handleNewCheckIn = useCallback((event: CheckInEvent) => {
     console.log("[v0] New check-in received:", event)
-    
-    // Use functional update to safely add to list
-    setRecentCheckIns((prev) => [event, ...prev.slice(0, 9)])
 
-    toast({
-      title: event.warning ? "⚠️ Passback Warning" : "✓ New Check-in",
-      description: `${event.member.firstName} ${event.member.lastName} checked in`,
-      variant: event.warning ? "destructive" : "default",
+    // 1. Update List Logic (Conflict Free)
+    setCheckInsData((prev) => {
+      // Only prepend new events if we are on Page 1 (Live View)
+      // If user is looking at history (Page 2+), don't disturb the view
+      if (checkInsPageRef.current === 1) {
+        const newList = [event, ...prev]
+        // Keep the list length controlled so it doesn't grow infinitely in memory
+        if (newList.length > checkInsPageSize) return newList.slice(0, checkInsPageSize)
+        return newList
+      }
+      return prev
     })
-  }, [toast])
 
-  // Pass the stable callback to your hook
+    // 2. Notification Logic
+    // Only show toast if we are NOT currently looking at the check-ins tab
+    if (activeTabRef.current !== "checkins") {
+      setUnreadCheckInsCount((prev) => prev + 1)
+      
+      toast({
+        title: event.warning ? "⚠️ Passback Warning" : "✓ New Check-in",
+        description: `${event.member.firstName} ${event.member.lastName} checked in`,
+        variant: event.warning ? "destructive" : "default",
+      })
+    }
+  }, [toast]) // No other dependencies ensures connection stays stable
+
+  // Connect to WebSocket
   const { isConnected, error: wsError } = useRealtimeCheckIns(handleNewCheckIn)
-  // --- WEBSOCKET FIX END ---
 
-  // Load members on change
-  useEffect(() => {
-    loadMembers()
-  }, [searchQuery, blockedFilter, currentPage])
-
+  // --- LOAD MEMBERS ---
   const loadMembers = async () => {
-    setIsLoading(true)
+    setIsMembersLoading(true)
     try {
       const blocked = blockedFilter === "blocked" ? true : blockedFilter === "active" ? false : undefined
-
-      const result = await getMembers(currentPage, searchQuery, blocked || false, pageSize.toString())
-
-      console.log("[v0] Loaded members:", result)
+      const result = await getMembers(membersPage, searchQuery, blocked || false, membersPageSize.toString())
 
       setMembersData(result.data || [])
-      setTotalMembers(result.total || 0)
-      setTotalPages(result.totalPages || 1)
+      setTotalMembers(result.pagination?.total || 0)
+      setTotalMembersPages(result.pagination?.totalPages || 1)
 
-      // Calculate stats (ideally the API returns this, but calculating client side works for small datasets)
-      // Note: If you have pagination, this stats count is only for the *current page* or requires a separate API call.
-      // For now we trust the result.total if available.
+      // Update stats based on loaded data
       setStats({
-        total: result.pagination?.total || result.total || 0,
-        blocked: 0, // Placeholder if API doesn't return count
-        active: 0,  // Placeholder
+        total: result.pagination?.total || 0,
+        blocked: 0, // Ideally API returns this
+        active: 0,
       })
     } catch (error) {
-      console.error("[v0] Failed to load members:", error)
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to load members",
-        variant: "destructive",
-      })
+      console.error(error)
+      toast({ title: "Error", description: "Failed to load members", variant: "destructive" })
     } finally {
-      setIsLoading(false)
+      setIsMembersLoading(false)
     }
   }
 
+  // Reload members when filters change
+  useEffect(() => {
+    if (activeTab === "members") {
+      loadMembers()
+    }
+  }, [searchQuery, blockedFilter, membersPage, activeTab])
+
+  // --- LOAD CHECK-INS ---
+  const loadCheckIns = async () => {
+    setIsCheckInsLoading(true)
+    try {
+      // Call the API endpoint
+      const result = await getCheckIns(checkInsPage, checkInsPageSize)
+      console.log("[v0] Loaded Checkins:", result)
+
+      setCheckInsData(result.data || [])
+      setTotalCheckIns(result.pagination?.total || 0)
+      setTotalCheckInsPages(result.pagination?.totalPages || 1)
+    } catch (error) {
+      console.error(error)
+      toast({ title: "Error", description: "Failed to load check-ins", variant: "destructive" })
+    } finally {
+      setIsCheckInsLoading(false)
+    }
+  }
+
+  // Reload check-ins when tab becomes active or page changes
+  useEffect(() => {
+    if (activeTab === "checkins") {
+      // Clear the "unread" badge since user is now looking at it
+      setUnreadCheckInsCount(0)
+      loadCheckIns()
+    }
+  }, [checkInsPage, activeTab])
+
+
+  // --- ACTION HANDLERS ---
   const handleSignOut = () => {
     localStorage.removeItem("token")
     router.push("/")
@@ -144,38 +194,19 @@ export default function OwnerDashboard() {
 
   const handleCreateMember = async () => {
     if (!newMemberForm.firstName || !newMemberForm.lastName || !newMemberForm.email) {
-      toast({
-        title: "Validation error",
-        description: "All fields are required",
-        variant: "destructive",
-      })
+      toast({ title: "Validation error", description: "All fields are required", variant: "destructive" })
       return
     }
-
     setIsCreating(true)
-
     try {
-      await createMember({
-        firstName: newMemberForm.firstName,
-        lastName: newMemberForm.lastName,
-        email: newMemberForm.email,
-      })
-
-      toast({
-        title: "Member created",
-        description: "New member has been added successfully.",
-      })
-
+      await createMember(newMemberForm)
+      toast({ title: "Member created", description: "New member has been added successfully." })
       setCreateDialogOpen(false)
       setNewMemberForm({ firstName: "", lastName: "", email: "" })
-      setCurrentPage(1)
+      setMembersPage(1)
       loadMembers()
     } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to create member",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: error instanceof Error ? error.message : "Failed to create member", variant: "destructive" })
     } finally {
       setIsCreating(false)
     }
@@ -184,17 +215,10 @@ export default function OwnerDashboard() {
   const handleResetQrCode = async (memberId: string) => {
     try {
       await resetQrCode(memberId)
-      toast({
-        title: "QR Code reset",
-        description: "Member QR code has been regenerated.",
-      })
+      toast({ title: "QR Code reset", description: "Member QR code has been regenerated." })
       loadMembers()
     } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to reset QR code",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "Failed to reset QR code", variant: "destructive" })
     }
   }
 
@@ -202,9 +226,7 @@ export default function OwnerDashboard() {
     try {
       const headers = ["firstName", "lastName", "email", "blocked", "emailValid", "createdAt"]
       const rows = membersData.map((m) => [m.firstName, m.lastName, m.email, m.blocked, m.emailValid, m.createdAt])
-
       const csv = [headers, ...rows].map((row) => row.map((cell) => `"${cell}"`).join(",")).join("\n")
-
       const blob = new Blob([csv], { type: "text/csv" })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement("a")
@@ -212,214 +234,56 @@ export default function OwnerDashboard() {
       a.download = `members-${new Date().toISOString().split("T")[0]}.csv`
       a.click()
       window.URL.revokeObjectURL(url)
-
-      toast({
-        title: "Export complete",
-        description: "Members data has been exported to CSV.",
-      })
+      toast({ title: "Export complete", description: "Members data has been exported to CSV." })
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to export CSV",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "Failed to export CSV", variant: "destructive" })
     }
   }
 
   const handleImportCSV = async () => {
-    if (!csvFile) {
-      toast({
-        title: "Error",
-        description: "Please select a CSV file",
-        variant: "destructive",
-      })
-      return
-    }
-
+    if (!csvFile) return
     const reader = new FileReader()
     reader.onload = async (e) => {
       try {
         const content = e.target?.result as string
         const lines = content.trim().split("\n")
         const headers = lines[0].split(",").map((h) => h.trim().toLowerCase())
-
         let imported = 0
-        const errors: string[] = []
-
         for (let i = 1; i < lines.length; i++) {
-          try {
-            const values = lines[i].split(",").map((v) => v.trim().replace(/^"|"$/g, ""))
-            const row: Record<string, string> = {}
-
-            headers.forEach((header, index) => {
-              row[header] = values[index] || ""
-            })
-
-            if (!row.firstname || !row.lastname || !row.email) {
-              errors.push(`Row ${i + 1}: Missing required fields`)
-              continue
-            }
-
-            await createMember({
-              firstName: row.firstname,
-              lastName: row.lastname,
-              email: row.email,
-            })
-
+          const values = lines[i].split(",").map((v) => v.trim().replace(/^"|"$/g, ""))
+          const row: Record<string, string> = {}
+          headers.forEach((header, index) => { row[header] = values[index] || "" })
+          if (row.firstname && row.lastname && row.email) {
+            await createMember({ firstName: row.firstname, lastName: row.lastname, email: row.email })
             imported++
-          } catch (error) {
-            errors.push(`Row ${i + 1}: ${error instanceof Error ? error.message : "Unknown error"}`)
           }
         }
-
-        toast({
-          title: "Import complete",
-          description: `Imported ${imported} members${errors.length > 0 ? `. ${errors.length} errors occurred.` : "."}`,
-        })
-
+        toast({ title: "Import complete", description: `Imported ${imported} members.` })
         setImportDialogOpen(false)
         setCsvFile(null)
-        setCurrentPage(1)
+        setMembersPage(1)
         loadMembers()
       } catch (error) {
-        toast({
-          title: "Error",
-          description: "Failed to import CSV",
-          variant: "destructive",
-        })
+        toast({ title: "Error", description: "Failed to import CSV", variant: "destructive" })
       }
     }
     reader.readAsText(csvFile)
   }
 
-  const handleViewMember = (member: Member) => {
-    setSelectedMember(member)
-    setDetailsDrawerOpen(true)
-  }
-
+  const handleViewMember = (member: Member) => { setSelectedMember(member); setDetailsDrawerOpen(true) }
+  
   const handlePrintQR = (member: Member) => {
     const printWindow = window.open("", "_blank")
     if (!printWindow) return
-
-    // Using a public API for QR generation for print view, but you could use your backend too
     const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(member.qrUuid)}`
-
     printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>QR Code - ${member.firstName} ${member.lastName}</title>
-          <style>
-            body {
-              font-family: system-ui, -apple-system, sans-serif;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-              min-height: 100vh;
-              margin: 0;
-              padding: 20px;
-              background: white;
-            }
-            .container {
-              text-align: center;
-              max-width: 400px;
-            }
-            .logo {
-              margin-bottom: 20px;
-            }
-            .logo img {
-              width: 150px;
-              height: auto;
-            }
-            h1 {
-              color: #2f699f;
-              margin: 0 0 10px 0;
-              font-size: 24px;
-            }
-            .subtitle {
-              color: #666;
-              margin: 0 0 30px 0;
-              font-size: 14px;
-            }
-            .qr-code {
-              margin: 30px 0;
-              padding: 20px;
-              background: white;
-              border: 2px solid #2f699f;
-              border-radius: 12px;
-              display: inline-block;
-            }
-            .qr-code img {
-              display: block;
-              width: 300px;
-              height: 300px;
-            }
-            .member-info {
-              margin-top: 30px;
-              padding: 20px;
-              background: #f5f5f5;
-              border-radius: 8px;
-              text-align: left;
-            }
-            .info-row {
-              margin: 10px 0;
-              font-size: 14px;
-            }
-            .info-label {
-              font-weight: 600;
-              color: #2f699f;
-              display: inline-block;
-              width: 100px;
-            }
-            .info-value {
-              color: #333;
-            }
-            @media print {
-              body {
-                padding: 0;
-              }
-              .container {
-                page-break-inside: avoid;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="logo">
-              </div>
-            <h1>15 Palle</h1>
-            <p class="subtitle">Associazione Sportiva</p>
-            
-            <div class="qr-code">
-              <img src="${qrCodeUrl}" alt="QR Code" />
-            </div>
-            
-            <div class="member-info">
-              <div class="info-row">
-                <span class="info-label">Name:</span>
-                <span class="info-value">${member.firstName} ${member.lastName}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Email:</span>
-                <span class="info-value">${member.email}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Member ID:</span>
-                <span class="info-value">${member._id}</span>
-              </div>
-            </div>
-          </div>
-          <script>
-            window.onload = function() {
-              setTimeout(function() {
-                window.print();
-              }, 500);
-            }
-          </script>
-        </body>
-      </html>
+      <!DOCTYPE html><html><head><title>QR Code</title></head>
+      <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;">
+        <h1>${member.firstName} ${member.lastName}</h1>
+        <img src="${qrCodeUrl}" style="width:300px;height:300px;margin:20px;" />
+        <p>${member.email}</p>
+        <script>window.onload = () => window.print();</script>
+      </body></html>
     `)
     printWindow.document.close()
   }
@@ -439,7 +303,7 @@ export default function OwnerDashboard() {
             </div>
           </div>
 
-          {/* Stats */}
+          {/* Stats Cards */}
           <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Card className="border-primary/20">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -450,42 +314,40 @@ export default function OwnerDashboard() {
                 <div className="text-2xl font-bold text-primary">{stats.total}</div>
               </CardContent>
             </Card>
-
             <Card className="border-green-200">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Active</CardTitle>
                 <Users className="h-4 w-4 text-green-600" />
               </CardHeader>
               <CardContent>
-                {/* Fallback to simple calculation if API doesn't return breakdown */}
                 <div className="text-2xl font-bold text-green-600">{membersData.filter(m => !m.blocked).length}</div>
               </CardContent>
             </Card>
-
             <Card className="border-red-200 sm:col-span-2 lg:col-span-1">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Blocked</CardTitle>
                 <Users className="h-4 w-4 text-red-600" />
               </CardHeader>
               <CardContent>
-                 {/* Fallback to simple calculation if API doesn't return breakdown */}
                 <div className="text-2xl font-bold text-red-600">{membersData.filter(m => m.blocked).length}</div>
               </CardContent>
             </Card>
           </div>
 
           {/* Tabs */}
-          <Tabs defaultValue="members" className="space-y-4">
+          {/* FIX: Bind activeTab state here */}
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="members">Members</TabsTrigger>
               <TabsTrigger value="checkins">
                 Recent Check-ins
-                {recentCheckIns.length > 0 && (
-                  <Badge className="ml-2 bg-primary text-primary-foreground">{recentCheckIns.length}</Badge>
+                {unreadCheckInsCount > 0 && (
+                  <Badge className="ml-2 bg-red-500 text-white hover:bg-red-600">{unreadCheckInsCount}</Badge>
                 )}
               </TabsTrigger>
             </TabsList>
 
+            {/* --- MEMBERS TAB --- */}
             <TabsContent value="members" className="space-y-4">
               <Card>
                 <CardHeader>
@@ -496,23 +358,20 @@ export default function OwnerDashboard() {
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row">
                       <Button onClick={() => setCreateDialogOpen(true)} size="sm">
-                        <UserPlus className="mr-2 h-4 w-4" />
-                        Add Member
+                        <UserPlus className="mr-2 h-4 w-4" /> Add Member
                       </Button>
                       <Button variant="outline" size="sm" onClick={handleExportCSV}>
-                        <Download className="mr-2 h-4 w-4" />
-                        Export
+                        <Download className="mr-2 h-4 w-4" /> Export
                       </Button>
                       <Button variant="outline" size="sm" onClick={() => setImportDialogOpen(true)}>
-                        <Upload className="mr-2 h-4 w-4" />
-                        Import
+                        <Upload className="mr-2 h-4 w-4" /> Import
                       </Button>
                     </div>
                   </div>
                 </CardHeader>
 
                 <CardContent className="space-y-6">
-                  {/* Filters */}
+                  {/* Members Filters */}
                   <div className="space-y-4">
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
@@ -521,10 +380,7 @@ export default function OwnerDashboard() {
                           id="search"
                           placeholder="Search by name or email..."
                           value={searchQuery}
-                          onChange={(e) => {
-                            setSearchQuery(e.target.value)
-                            setCurrentPage(1)
-                          }}
+                          onChange={(e) => { setSearchQuery(e.target.value); setMembersPage(1) }}
                         />
                       </div>
                       <div className="space-y-2">
@@ -532,10 +388,7 @@ export default function OwnerDashboard() {
                         <select
                           id="status"
                           value={blockedFilter}
-                          onChange={(e) => {
-                            setBlockedFilter(e.target.value as "all" | "blocked" | "active")
-                            setCurrentPage(1)
-                          }}
+                          onChange={(e) => { setBlockedFilter(e.target.value as any); setMembersPage(1) }}
                           className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                         >
                           <option value="all">All Members</option>
@@ -546,8 +399,8 @@ export default function OwnerDashboard() {
                     </div>
                   </div>
 
-                  {/* Table */}
-                  {isLoading ? (
+                  {/* Members Table */}
+                  {isMembersLoading ? (
                     <div className="flex items-center justify-center py-12">
                       <div className="text-muted-foreground">Loading members...</div>
                     </div>
@@ -566,85 +419,42 @@ export default function OwnerDashboard() {
                         <TableBody>
                           {membersData.map((member) => (
                             <TableRow key={member._id}>
-                              <TableCell className="font-medium">
-                                {member.firstName} {member.lastName}
-                              </TableCell>
+                              <TableCell className="font-medium">{member.firstName} {member.lastName}</TableCell>
                               <TableCell className="hidden sm:table-cell">{member.email}</TableCell>
-                              <TableCell className="hidden md:table-cell">
-                                {new Date(member.createdAt).toLocaleDateString()}
-                              </TableCell>
+                              <TableCell className="hidden md:table-cell">{new Date(member.createdAt).toLocaleDateString()}</TableCell>
                               <TableCell>
-                                {member.blocked ? (
-                                  <Badge variant="destructive">Blocked</Badge>
-                                ) : member.emailValid ? (
-                                  <Badge className="bg-green-600 hover:bg-green-700">Active</Badge>
-                                ) : (
-                                  <Badge variant="secondary">Pending</Badge>
-                                )}
+                                {member.blocked ? <Badge variant="destructive">Blocked</Badge> : 
+                                 member.emailValid ? <Badge className="bg-green-600">Active</Badge> : 
+                                 <Badge variant="secondary">Pending</Badge>}
                               </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex justify-end gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => handleViewMember(member)}
-                                    title="View details"
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => handlePrintQR(member)}
-                                    title="Print QR code"
-                                  >
-                                    <Printer className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => handleResetQrCode(member._id)}
-                                    title="Reset QR code"
-                                  >
-                                    <RotateCcw className="h-4 w-4" />
-                                  </Button>
+                                  <Button variant="ghost" size="icon" onClick={() => handleViewMember(member)}><Eye className="h-4 w-4" /></Button>
+                                  <Button variant="ghost" size="icon" onClick={() => handlePrintQR(member)}><Printer className="h-4 w-4" /></Button>
+                                  <Button variant="ghost" size="icon" onClick={() => handleResetQrCode(member._id)}><RotateCcw className="h-4 w-4" /></Button>
                                 </div>
                               </TableCell>
                             </TableRow>
                           ))}
                           {membersData.length === 0 && (
-                            <TableRow>
-                              <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                                No members found
-                              </TableCell>
-                            </TableRow>
+                            <TableRow><TableCell colSpan={5} className="text-center py-8">No members found</TableCell></TableRow>
                           )}
                         </TableBody>
                       </Table>
                     </div>
                   )}
 
-                  {/* Pagination */}
-                  {totalPages > 1 && (
+                  {/* Members Pagination */}
+                  {totalMembersPages > 1 && (
                     <div className="flex items-center justify-between">
                       <p className="text-sm text-muted-foreground">
-                        Page {currentPage} of {totalPages} ({totalMembers} total members)
+                        Page {membersPage} of {totalMembersPages} ({totalMembers} members)
                       </p>
                       <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                          disabled={currentPage === 1}
-                        >
+                        <Button variant="outline" size="sm" onClick={() => setMembersPage(p => Math.max(1, p - 1))} disabled={membersPage === 1}>
                           <ChevronLeft className="h-4 w-4" />
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                          disabled={currentPage === totalPages}
-                        >
+                        <Button variant="outline" size="sm" onClick={() => setMembersPage(p => Math.min(totalMembersPages, p + 1))} disabled={membersPage === totalMembersPages}>
                           <ChevronRight className="h-4 w-4" />
                         </Button>
                       </div>
@@ -654,24 +464,25 @@ export default function OwnerDashboard() {
               </Card>
             </TabsContent>
 
+            {/* --- CHECK-INS TAB --- */}
             <TabsContent value="checkins" className="space-y-4">
               <Card>
-                <CardHeader>
-                  <CardTitle>Recent Check-ins</CardTitle>
-                  <CardDescription>Real-time check-ins via WebSocket</CardDescription>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle>Recent Check-ins</CardTitle>
+                    <CardDescription>Real-time log of member access</CardDescription>
+                  </div>
+                  {isCheckInsLoading && <div className="text-sm text-muted-foreground">Refreshing...</div>}
                 </CardHeader>
                 <CardContent>
-                  {recentCheckIns.length === 0 ? (
+                  {checkInsData.length === 0 && !isCheckInsLoading ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center">
                       <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
-                      <p className="text-muted-foreground">No recent check-ins</p>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        Check-ins will appear here in real-time when members scan their QR codes
-                      </p>
+                      <p className="text-muted-foreground">No recent check-ins found</p>
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {recentCheckIns.map((checkIn, index) => (
+                      {checkInsData.map((checkIn: CheckInEvent, index) => (
                         <div
                           key={index}
                           className={`flex items-center justify-between rounded-lg border p-4 ${
@@ -679,18 +490,18 @@ export default function OwnerDashboard() {
                           }`}
                         >
                           <div className="flex items-center gap-4">
-                            <div
-                              className={`flex h-10 w-10 items-center justify-center rounded-full ${
+                            <div className={`flex h-10 w-10 items-center justify-center rounded-full ${
                                 checkIn.warning ? "bg-red-600" : "bg-primary"
-                              } text-white`}
-                            >
+                              } text-white`}>
                               {checkIn.warning ? "⚠" : "✓"}
                             </div>
                             <div>
                               <p className="font-semibold">
-                                {checkIn.member.firstName} {checkIn.member.lastName}
+                                {checkIn.member ? `${checkIn.member.firstName} ${checkIn.member.lastName}` : "Unknown Member"}
                               </p>
-                              <p className="text-sm text-muted-foreground">{checkIn.member.email}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {checkIn.member?.email || "No email"}
+                              </p>
                               {checkIn.warning && (
                                 <p className="text-sm text-red-600 font-medium mt-1">{checkIn.warning}</p>
                               )}
@@ -698,16 +509,41 @@ export default function OwnerDashboard() {
                           </div>
                           <div className="text-right">
                             <p className="text-sm text-muted-foreground">
-                              {new Date(checkIn.timestamp).toLocaleTimeString()}
+                              {new Date(checkIn.timestamp || Date.now()).toLocaleTimeString()}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              {new Date(checkIn.timestamp).toLocaleDateString()}
+                              {new Date(checkIn.timestamp || Date.now()).toLocaleDateString()}
                             </p>
                           </div>
                         </div>
                       ))}
                     </div>
                   )}
+
+                  {/* Check-ins Pagination */}
+                  <div className="mt-6 flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground">
+                      Page {checkInsPage} of {totalCheckInsPages} ({totalCheckIns} check ins)
+                    </p>
+                    <div className="flex gap-2">
+                        <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => setCheckInsPage(p => Math.max(1, p - 1))} 
+                            disabled={checkInsPage === 1 || isCheckInsLoading}
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => setCheckInsPage(p => Math.min(totalCheckInsPages, p + 1))} 
+                            disabled={checkInsPage === totalCheckInsPages || isCheckInsLoading}
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -774,12 +610,8 @@ export default function OwnerDashboard() {
             <Input type="file" accept=".csv" onChange={(e) => setCsvFile(e.target.files?.[0] || null)} />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleImportCSV} disabled={!csvFile}>
-              Import
-            </Button>
+            <Button variant="outline" onClick={() => setImportDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleImportCSV} disabled={!csvFile}>Import</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -797,70 +629,25 @@ export default function OwnerDashboard() {
                 <Card className="px-4 py-3">
                   <h3 className="mb-3 text-sm font-semibold">Personal Information</h3>
                   <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Name:</span>
-                      <span className="font-medium">
-                        {selectedMember.firstName} {selectedMember.lastName}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Email:</span>
-                      <span className="font-medium">{selectedMember.email}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Member ID:</span>
-                      <span className="font-mono text-xs">{selectedMember._id}</span>
-                    </div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Name:</span><span className="font-medium">{selectedMember.firstName} {selectedMember.lastName}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Email:</span><span className="font-medium">{selectedMember.email}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">ID:</span><span className="font-mono text-xs">{selectedMember._id}</span></div>
                   </div>
                 </Card>
-
-                <Card className="px-4 py-3">
-                  <h3 className="mb-3 text-sm font-semibold">Account Status</h3>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Status:</span>
-                      {selectedMember.blocked ? (
-                        <Badge variant="destructive">Blocked</Badge>
-                      ) : selectedMember.emailValid ? (
-                        <Badge className="bg-green-600">Active</Badge>
-                      ) : (
-                        <Badge variant="secondary">Pending</Badge>
-                      )}
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Email Verified:</span>
-                      <span className="font-medium">{selectedMember.emailValid ? "Yes" : "No"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Created:</span>
-                      <span className="font-medium">{new Date(selectedMember.createdAt).toLocaleDateString()}</span>
-                    </div>
-                  </div>
-                </Card>
-
                 <Card className="px-4 py-3">
                   <h3 className="mb-3 text-sm font-semibold">QR Code</h3>
                   <div className="flex justify-center py-4">
                     <img
                       src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(selectedMember.qrUuid)}`}
                       alt="Member QR Code"
+                      className="rounded-lg border-2 border-primary"
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground text-center mt-2">
-                    QR UUID: {selectedMember.qrUuid.substring(0, 8)}...
-                  </p>
                 </Card>
               </div>
-
               <div className="flex flex-col gap-2">
-                <Button onClick={() => handlePrintQR(selectedMember)} className="w-full">
-                  <Printer className="mr-2 h-4 w-4" />
-                  Print QR Code
-                </Button>
-                <Button variant="outline" onClick={() => handleResetQrCode(selectedMember._id)} className="w-full">
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                  Reset QR Code
-                </Button>
+                <Button onClick={() => handlePrintQR(selectedMember)} className="w-full"><Printer className="mr-2 h-4 w-4" /> Print QR</Button>
+                <Button variant="outline" onClick={() => handleResetQrCode(selectedMember._id)} className="w-full"><RotateCcw className="mr-2 h-4 w-4" /> Reset QR</Button>
               </div>
             </div>
           )}
