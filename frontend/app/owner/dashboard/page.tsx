@@ -24,7 +24,6 @@ import { getMembers, createMember, resetQrCode } from "@/lib/api"
 import { useRealtimeCheckIns } from "@/hooks/use-realtime"
 import type { Member, CheckInEvent } from "@/lib/types"
 import {
-  LogOut,
   Users,
   Download,
   Upload,
@@ -69,6 +68,8 @@ export default function OwnerDashboard() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [csvFile, setCsvFile] = useState<File | null>(null)
+
+  const [isCreating, setIsCreating] = useState(false)
 
   // Create member form
   const [newMemberForm, setNewMemberForm] = useState({
@@ -151,6 +152,8 @@ export default function OwnerDashboard() {
       return
     }
 
+    setIsCreating(true)
+
     try {
       await createMember({
         firstName: newMemberForm.firstName,
@@ -173,6 +176,8 @@ export default function OwnerDashboard() {
         description: error instanceof Error ? error.message : "Failed to create member",
         variant: "destructive",
       })
+    } finally {
+      setIsCreating(false)
     }
   }
 
@@ -753,7 +758,7 @@ export default function OwnerDashboard() {
             <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateMember}>Create Member</Button>
+            <Button onClick={handleCreateMember} disabled={isCreating}>{isCreating ? "Creating..." : "Create Member"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
