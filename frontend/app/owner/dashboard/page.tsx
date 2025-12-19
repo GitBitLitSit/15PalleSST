@@ -20,8 +20,8 @@ import {
 } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Label } from "@/components/ui/label"
-// FIX: Added getCheckIns to imports
-import { getMembers, createMember, resetQrCode, getCheckIns } from "@/lib/api"
+// FIX: Added updateMember to imports
+import { getMembers, createMember, resetQrCode, getCheckIns, updateMember } from "@/lib/api"
 import { useRealtimeCheckIns } from "@/hooks/use-realtime"
 import type { Member, CheckInEvent } from "@/lib/types"
 import {
@@ -35,6 +35,7 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertCircle,
+  Pencil, // Added Pencil icon
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -51,7 +52,6 @@ export default function OwnerDashboard() {
   }, [router])
 
   // --- UI STATE ---
-  // Track which tab is active to manage notifications
   const [activeTab, setActiveTab] = useState("members")
 
   // --- MEMBERS STATE ---
@@ -64,7 +64,7 @@ export default function OwnerDashboard() {
   const [isMembersLoading, setIsMembersLoading] = useState(false)
   const membersPageSize = 20
 
-  // --- CHECK-INS STATE (NEW) ---
+  // --- CHECK-INS STATE ---
   const [checkInsData, setCheckInsData] = useState<CheckInEvent[]>([])
   const [checkInsPage, setCheckInsPage] = useState(1)
   const [totalCheckIns, setTotalCheckIns] = useState(0)
@@ -73,9 +73,7 @@ export default function OwnerDashboard() {
   const [unreadCheckInsCount, setUnreadCheckInsCount] = useState(0)
   const checkInsPageSize = 20
 
-  // --- REFS FOR WEBSOCKET CLOSURE ---
-  // We use refs to access the *current* state inside the WebSocket callback
-  // without triggering a re-connection every time the state changes.
+  // --- REFS ---
   const activeTabRef = useRef(activeTab)
   const checkInsPageRef = useRef(checkInsPage)
 
@@ -85,44 +83,50 @@ export default function OwnerDashboard() {
   // --- DIALOGS & FORMS ---
   const [selectedMember, setSelectedMember] = useState<Member | null>(null)
   const [detailsDrawerOpen, setDetailsDrawerOpen] = useState(false)
+  
+  // Create State
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
-  const [importDialogOpen, setImportDialogOpen] = useState(false)
-  const [csvFile, setCsvFile] = useState<File | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [newMemberForm, setNewMemberForm] = useState({ firstName: "", lastName: "", email: "" })
+  
+  // Import State
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [csvFile, setCsvFile] = useState<File | null>(null)
+  
+  // Edit State (NEW)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [editMemberForm, setEditMemberForm] = useState({ 
+    id: "", 
+    firstName: "", 
+    lastName: "", 
+    email: "", 
+    blocked: false 
+  })
+
   const [stats, setStats] = useState({ total: 0, blocked: 0, active: 0 })
 
   // --- WEBSOCKET HANDLER ---
   const handleNewCheckIn = useCallback((event: CheckInEvent) => {
-    console.log("[v0] New check-in received:", event)
-
-    // 1. Update List Logic (Conflict Free)
     setCheckInsData((prev) => {
-      // Only prepend new events if we are on Page 1 (Live View)
-      // If user is looking at history (Page 2+), don't disturb the view
       if (checkInsPageRef.current === 1) {
         const newList = [event, ...prev]
-        // Keep the list length controlled so it doesn't grow infinitely in memory
         if (newList.length > checkInsPageSize) return newList.slice(0, checkInsPageSize)
         return newList
       }
       return prev
     })
 
-    // 2. Notification Logic
-    // Only show toast if we are NOT currently looking at the check-ins tab
     if (activeTabRef.current !== "checkins") {
       setUnreadCheckInsCount((prev) => prev + 1)
-      
       toast({
         title: event.warning ? "⚠️ Passback Warning" : "✓ New Check-in",
         description: `${event.member.firstName} ${event.member.lastName} checked in`,
         variant: event.warning ? "destructive" : "default",
       })
     }
-  }, [toast]) // No other dependencies ensures connection stays stable
+  }, [toast])
 
-  // Connect to WebSocket
   const { isConnected, error: wsError } = useRealtimeCheckIns(handleNewCheckIn)
 
   // --- LOAD MEMBERS ---
@@ -135,11 +139,9 @@ export default function OwnerDashboard() {
       setMembersData(result.data || [])
       setTotalMembers(result.pagination?.total || 0)
       setTotalMembersPages(result.pagination?.totalPages || 1)
-
-      // Update stats based on loaded data
       setStats({
         total: result.pagination?.total || 0,
-        blocked: 0, // Ideally API returns this
+        blocked: 0, 
         active: 0,
       })
     } catch (error) {
@@ -150,7 +152,6 @@ export default function OwnerDashboard() {
     }
   }
 
-  // Reload members when filters change
   useEffect(() => {
     if (activeTab === "members") {
       loadMembers()
@@ -161,10 +162,7 @@ export default function OwnerDashboard() {
   const loadCheckIns = async () => {
     setIsCheckInsLoading(true)
     try {
-      // Call the API endpoint
       const result = await getCheckIns(checkInsPage, checkInsPageSize)
-      console.log("[v0] Loaded Checkins:", result)
-
       setCheckInsData(result.data || [])
       setTotalCheckIns(result.pagination?.total || 0)
       setTotalCheckInsPages(result.pagination?.totalPages || 1)
@@ -176,10 +174,8 @@ export default function OwnerDashboard() {
     }
   }
 
-  // Reload check-ins when tab becomes active or page changes
   useEffect(() => {
     if (activeTab === "checkins") {
-      // Clear the "unread" badge since user is now looking at it
       setUnreadCheckInsCount(0)
       loadCheckIns()
     }
@@ -209,6 +205,43 @@ export default function OwnerDashboard() {
       toast({ title: "Error", description: error instanceof Error ? error.message : "Failed to create member", variant: "destructive" })
     } finally {
       setIsCreating(false)
+    }
+  }
+
+  // Handle Edit Click
+  const handleEditClick = (member: Member) => {
+    setEditMemberForm({
+      id: member._id,
+      firstName: member.firstName,
+      lastName: member.lastName,
+      email: member.email,
+      blocked: member.blocked || false
+    })
+    setEditDialogOpen(true)
+  }
+
+  // Handle Update Logic
+  const handleUpdateMember = async () => {
+     if (!editMemberForm.firstName || !editMemberForm.lastName || !editMemberForm.email) {
+      toast({ title: "Validation error", description: "All fields are required", variant: "destructive" })
+      return
+    }
+    setIsUpdating(true)
+    try {
+      // Assuming updateMember takes (id, data)
+      await updateMember(editMemberForm.id, {
+        firstName: editMemberForm.firstName,
+        lastName: editMemberForm.lastName,
+        email: editMemberForm.email,
+        blocked: editMemberForm.blocked
+      })
+      toast({ title: "Member updated", description: "Member details have been updated." })
+      setEditDialogOpen(false)
+      loadMembers() // Refresh list
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to update member", variant: "destructive" })
+    } finally {
+      setIsUpdating(false)
     }
   }
 
@@ -334,8 +367,6 @@ export default function OwnerDashboard() {
             </Card>
           </div>
 
-          {/* Tabs */}
-          {/* FIX: Bind activeTab state here */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="members">Members</TabsTrigger>
@@ -371,7 +402,7 @@ export default function OwnerDashboard() {
                 </CardHeader>
 
                 <CardContent className="space-y-6">
-                  {/* Members Filters */}
+                  {/* Filters */}
                   <div className="space-y-4">
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
@@ -429,9 +460,16 @@ export default function OwnerDashboard() {
                               </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex justify-end gap-2">
-                                  <Button variant="ghost" size="icon" onClick={() => handleViewMember(member)}><Eye className="h-4 w-4" /></Button>
-                                  <Button variant="ghost" size="icon" onClick={() => handlePrintQR(member)}><Printer className="h-4 w-4" /></Button>
-                                  <Button variant="ghost" size="icon" onClick={() => handleResetQrCode(member._id)}><RotateCcw className="h-4 w-4" /></Button>
+                                  <Button variant="ghost" size="icon" onClick={() => handleViewMember(member)}>
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" onClick={() => handlePrintQR(member)}>
+                                    <Printer className="h-4 w-4" />
+                                  </Button>
+                                  {/* Changed RotateCcw to Pencil (Edit) */}
+                                  <Button variant="ghost" size="icon" onClick={() => handleEditClick(member)}>
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -444,7 +482,7 @@ export default function OwnerDashboard() {
                     </div>
                   )}
 
-                  {/* Members Pagination */}
+                  {/* Pagination */}
                   {totalMembersPages > 1 && (
                     <div className="flex items-center justify-between">
                       <p className="text-sm text-muted-foreground">
@@ -472,10 +510,14 @@ export default function OwnerDashboard() {
                     <CardTitle>Recent Check-ins</CardTitle>
                     <CardDescription>Real-time log of member access</CardDescription>
                   </div>
-                  {isCheckInsLoading && <div className="text-sm text-muted-foreground">Refreshing...</div>}
                 </CardHeader>
                 <CardContent>
-                  {checkInsData.length === 0 && !isCheckInsLoading ? (
+                  {/* FIX: Standardized loading state to match members tab */}
+                  {isCheckInsLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <div className="text-muted-foreground">Loading check-ins...</div>
+                    </div>
+                  ) : checkInsData.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center">
                       <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
                       <p className="text-muted-foreground">No recent check-ins found</p>
@@ -485,8 +527,6 @@ export default function OwnerDashboard() {
                       {checkInsData.map((checkIn: CheckInEvent, index) => {
                         const hasWarning = checkIn.warning;
                         const warningMessage = checkIn.warning;
-
-                        console.log("Rendering check-in:", checkIn);
 
                         return (
                           <div
@@ -527,7 +567,6 @@ export default function OwnerDashboard() {
                     </div>
                   )}
 
-                  {/* Check-ins Pagination */}
                   <div className="mt-6 flex items-center justify-between">
                     <p className="text-sm text-muted-foreground">
                       Page {checkInsPage} of {totalCheckInsPages} ({totalCheckIns} check ins)
@@ -602,6 +641,80 @@ export default function OwnerDashboard() {
               Cancel
             </Button>
             <Button onClick={handleCreateMember} disabled={isCreating}>{isCreating ? "Creating..." : "Create Member"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* NEW: Edit Member Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Member</DialogTitle>
+            <DialogDescription>Update member details and status</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-firstName">First Name</Label>
+              <Input
+                id="edit-firstName"
+                value={editMemberForm.firstName}
+                onChange={(e) => setEditMemberForm({ ...editMemberForm, firstName: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-lastName">Last Name</Label>
+              <Input
+                id="edit-lastName"
+                value={editMemberForm.lastName}
+                onChange={(e) => setEditMemberForm({ ...editMemberForm, lastName: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-email">Email</Label>
+              <Input
+                id="edit-email"
+                value={editMemberForm.email}
+                onChange={(e) => setEditMemberForm({ ...editMemberForm, email: e.target.value })}
+              />
+            </div>
+            
+            {/* Status Radio Buttons */}
+            <div className="space-y-3 pt-2">
+              <Label>Status</Label>
+              <div className="flex gap-6">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="radio"
+                    id="status-active"
+                    name="status"
+                    className="h-4 w-4 border-gray-300 text-primary focus:ring-primary"
+                    checked={!editMemberForm.blocked}
+                    onChange={() => setEditMemberForm({ ...editMemberForm, blocked: false })}
+                  />
+                  <Label htmlFor="status-active" className="font-normal cursor-pointer">Active</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="radio"
+                    id="status-blocked"
+                    name="status"
+                    className="h-4 w-4 border-gray-300 text-red-600 focus:ring-red-600"
+                    checked={editMemberForm.blocked}
+                    onChange={() => setEditMemberForm({ ...editMemberForm, blocked: true })}
+                  />
+                  <Label htmlFor="status-blocked" className="font-normal cursor-pointer text-red-600">Blocked</Label>
+                </div>
+              </div>
+            </div>
+
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateMember} disabled={isUpdating}>
+              {isUpdating ? "Saving..." : "Save Changes"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

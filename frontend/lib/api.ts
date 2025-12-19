@@ -85,6 +85,15 @@ export async function getCheckIns(page = 1, limit = 50) {
   return handleResponse(res)
 }
 
+export async function updateMember(id: string, data: {firstName: string, lastName: string, email: string, blocked: boolean} ) {
+  const res = await fetch(`${API_URL}/members/${id}`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  })
+  return handleResponse(res)
+}
+
 async function handleResponse(res: Response) {
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}))
