@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Label } from "@/components/ui/label"
-// FIX: Added updateMember to imports
 import { getMembers, createMember, resetQrCode, getCheckIns, updateMember } from "@/lib/api"
 import { useRealtimeCheckIns } from "@/hooks/use-realtime"
 import type { Member, CheckInEvent } from "@/lib/types"
@@ -35,9 +34,10 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertCircle,
-  Pencil, // Added Pencil icon
+  Pencil,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { Switch } from "@/components/ui/switch"
 
 export default function OwnerDashboard() {
   const router = useRouter()
@@ -87,13 +87,19 @@ export default function OwnerDashboard() {
   // Create State
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
-  const [newMemberForm, setNewMemberForm] = useState({ firstName: "", lastName: "", email: "" })
+  const [newMemberForm, setNewMemberForm] = useState({ 
+    firstName: "", 
+    lastName: "", 
+    email: "", 
+    sendEmail: false 
+  })
+  const [createError, setCreateError] = useState<string | null>(null)
   
   // Import State
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [csvFile, setCsvFile] = useState<File | null>(null)
   
-  // Edit State (NEW)
+  // Edit State
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
   const [editMemberForm, setEditMemberForm] = useState({ 
@@ -105,6 +111,16 @@ export default function OwnerDashboard() {
   })
 
   const [stats, setStats] = useState({ total: 0, blocked: 0, active: 0 })
+
+  // --- NEU: CLEANUP EFFECT ---
+  // Dieser Effect feuert immer, wenn der Dialog geschlossen wird (createDialogOpen wird false).
+  // Er setzt das Formular UND die Fehlermeldung zurück.
+  useEffect(() => {
+    if (!createDialogOpen) {
+      setCreateError(null)
+      setNewMemberForm({ firstName: "", lastName: "", email: "", sendEmail: false })
+    }
+  }, [createDialogOpen])
 
   // --- WEBSOCKET HANDLER ---
   const handleNewCheckIn = useCallback((event: CheckInEvent) => {
@@ -189,20 +205,24 @@ export default function OwnerDashboard() {
   }
 
   const handleCreateMember = async () => {
+    setCreateError(null)
+
     if (!newMemberForm.firstName || !newMemberForm.lastName || !newMemberForm.email) {
-      toast({ title: "Validation error", description: "All fields are required", variant: "destructive" })
+      setCreateError("All fields are required")
       return
     }
+
     setIsCreating(true)
     try {
       await createMember(newMemberForm)
       toast({ title: "Member created", description: "New member has been added successfully." })
       setCreateDialogOpen(false)
-      setNewMemberForm({ firstName: "", lastName: "", email: "" })
+      // Reset wird jetzt vom useEffect erledigt
       setMembersPage(1)
       loadMembers()
     } catch (error) {
-      toast({ title: "Error", description: error instanceof Error ? error.message : "Failed to create member", variant: "destructive" })
+      const errorMessage = error instanceof Error ? error.message : "Failed to create member"
+      setCreateError(errorMessage) 
     } finally {
       setIsCreating(false)
     }
@@ -228,7 +248,6 @@ export default function OwnerDashboard() {
     }
     setIsUpdating(true)
     try {
-      // Assuming updateMember takes (id, data)
       await updateMember(editMemberForm.id, {
         firstName: editMemberForm.firstName,
         lastName: editMemberForm.lastName,
@@ -237,7 +256,7 @@ export default function OwnerDashboard() {
       })
       toast({ title: "Member updated", description: "Member details have been updated." })
       setEditDialogOpen(false)
-      loadMembers() // Refresh list
+      loadMembers()
     } catch (error) {
       toast({ title: "Error", description: "Failed to update member", variant: "destructive" })
     } finally {
@@ -466,7 +485,6 @@ export default function OwnerDashboard() {
                                   <Button variant="ghost" size="icon" onClick={() => handlePrintQR(member)}>
                                     <Printer className="h-4 w-4" />
                                   </Button>
-                                  {/* Changed RotateCcw to Pencil (Edit) */}
                                   <Button variant="ghost" size="icon" onClick={() => handleEditClick(member)}>
                                     <Pencil className="h-4 w-4" />
                                   </Button>
@@ -512,7 +530,6 @@ export default function OwnerDashboard() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {/* FIX: Standardized loading state to match members tab */}
                   {isCheckInsLoading ? (
                     <div className="flex items-center justify-center py-12">
                       <div className="text-muted-foreground">Loading check-ins...</div>
@@ -635,6 +652,28 @@ export default function OwnerDashboard() {
                 placeholder="john.doe@example.com"
               />
             </div>
+
+            {/* Send Email Toggle */}
+            <div className="flex items-center space-x-2 pt-2">
+              <Switch 
+                id="send-email" 
+                checked={newMemberForm.sendEmail}
+                onCheckedChange={(checked) => setNewMemberForm({...newMemberForm, sendEmail: checked})}
+              />
+              <Label htmlFor="send-email" className="font-normal cursor-pointer">
+                Send email with QR-code
+              </Label>
+            </div>
+
+            {/* Error Message Display */}
+            {createError && (
+              <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 mt-2">
+                <p className="text-sm text-destructive font-medium flex items-center">
+                  <AlertCircle className="h-4 w-4 mr-2" />
+                  {createError}
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
@@ -645,7 +684,7 @@ export default function OwnerDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* NEW: Edit Member Dialog */}
+      {/* Edit Member Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -760,7 +799,7 @@ export default function OwnerDashboard() {
                     <img
                       src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(selectedMember.qrUuid)}`}
                       alt="Member QR Code"
-                      className="rounded-lg"
+                      className="rounded-lg border-2 border-primary"
                     />
                   </div>
                 </Card>

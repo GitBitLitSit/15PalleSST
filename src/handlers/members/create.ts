@@ -17,15 +17,15 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     try {
         verifyJWT(token);
 
-        let { firstName, lastName, email } = JSON.parse(event.body || "{}");
+        let { firstName, lastName, email, sendEmail } = JSON.parse(event.body || "{}");
         const trimmedFirstName = firstName?.trim() ?? "";
         const trimmedLastName = lastName?.trim() ?? "";
         const trimmedEmail = email?.trim() ?? "";
 
-        if (!trimmedFirstName || !trimmedLastName || !trimmedEmail) {
+        if (!trimmedFirstName || !trimmedLastName || !trimmedEmail || typeof sendEmail !== "boolean") {
             return {
                 statusCode: 400,
-                body: JSON.stringify({ error: "first name , last name, and email are required" }),
+                body: JSON.stringify({ error: "first name , last name, email, and sendEmail are required" }),
             };
         } else if (trimmedEmail.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/) === null) {
             return {
@@ -50,23 +50,30 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
         const result = await collection.insertOne(newMember);
 
-        const { success, error } = await sendQrCodeEmail(process.env.SES_SENDER_EMAIL!, trimmedFirstName, trimmedLastName, trimmedEmail, qrUuid);
+        if (sendEmail) {
+            const { success, error } = await sendQrCodeEmail(process.env.SES_SENDER_EMAIL!, trimmedFirstName, trimmedLastName, trimmedEmail, qrUuid);
 
-        if (success) {
-            await collection.updateOne(
-                { _id: result.insertedId },
-                { $set: { emailValid: true } }
-            );
+            if (success) {
+                await collection.updateOne(
+                    { _id: result.insertedId },
+                    { $set: { emailValid: true } }
+                );
 
-            return {
-                statusCode: 201,
-                body: JSON.stringify({ message: "Member created and email sent", memberId: result.insertedId }),
-            };
-        } else {
-            return {
-                statusCode: 201,
-                body: JSON.stringify({ message: "Member created but failed to send email", details: error, memberId: result.insertedId }),
-            };
+                return {
+                    statusCode: 201,
+                    body: JSON.stringify({ message: "Member created and email sent", memberId: result.insertedId }),
+                };
+            } else {
+                return {
+                    statusCode: 201,
+                    body: JSON.stringify({ message: "Member created but failed to send email", details: error, memberId: result.insertedId }),
+                };
+            }
+        }
+
+        return {
+            statusCode: 201,
+            body: JSON.stringify({ message: "Member created", memberId: result.insertedId }),
         }
     } catch (error) {
         // Email already exists
