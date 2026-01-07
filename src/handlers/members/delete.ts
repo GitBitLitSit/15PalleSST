@@ -17,7 +17,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         const id = event.pathParameters?.id;
 
         if (!id) {
-            return { statusCode: 400, body: JSON.stringify({ error: "MEMBER_ID_REQUIRED" }) };
+            return { statusCode: 400, body: JSON.stringify({ error: "MEMBER_ID_REQUIRED_IN_PATH" }) };
         }
 
         const db = await connectToMongo();
