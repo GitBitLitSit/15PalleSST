@@ -9,7 +9,7 @@ const ses = new SESClient({ region: "eu-west-1" });
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     const SAFE_RESPONSE = {
         statusCode: 200,
-        body: JSON.stringify({ message: "If this account exists, a code has been sent." }),
+        body: JSON.stringify({ message: "IF_ACCOUNT_EXISTS" }),
     };
 
     try {
@@ -19,7 +19,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (!trimmedEmail) {
             return {
                 statusCode: 400,
-                body: JSON.stringify({ error: "Email is required" }),
+                body: JSON.stringify({ error: "EMAIL_REQUIRED" }),
             };
         }
 
@@ -67,7 +67,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         console.error("Request Code Error:", error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: "Internal Server Error" }),
+            body: JSON.stringify({ error: "INTERNAL_SERVER_ERROR" }),
         };
     }
 };

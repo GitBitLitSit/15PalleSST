@@ -17,7 +17,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (!trimmedEmail || !trimmedVerificationCode) {
             return {
                 statusCode: 400,
-                body: JSON.stringify({ error: "Email and confirmation code are required" }),
+                body: JSON.stringify({ error: "EMAIL_AND_CONFIRMATION_CODE" }),
             };
         }
 
@@ -29,7 +29,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (!memberRecord) {
             return {
                 statusCode: 404,
-                body: JSON.stringify({ error: "Member with this email not found" }),
+                body: JSON.stringify({ error: "MEMBER_NOT_FOUND" }),
             }
         }
 
@@ -40,17 +40,17 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (!emailVerificationRecord) {
             return {
                 statusCode: 403,
-                body: JSON.stringify({ error: "Invalid email or verification code" }),
+                body: JSON.stringify({ error: "INVALID_EMAIL_OR_CODE" }),
             }
         } else if (new Date(emailVerificationRecord.expiresAt) < new Date()) {
             return {
                 statusCode: 400,
-                body: JSON.stringify({ error: "Verification code has expired" }),
+                body: JSON.stringify({ error: "CODE_EXPIRED" }),
             }
         } else if (emailVerificationRecord.verificationCode !== trimmedVerificationCode) {
             return {
                 statusCode: 400,
-                body: JSON.stringify({ error: "Invalid verification code" }),
+                body: JSON.stringify({ error: "INVALID_CODE" }),
             }
         }
 
@@ -65,12 +65,12 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     
         if (method === "email") {
             await sendQrCodeEmail(process.env.SES_SENDER_EMAIL!, memberRecord.firstName, memberRecord.lastName, memberRecord.email, memberRecord.qrUuid);
-            responseBody = { success: true, message: "QR Code has been sent to your email." };
+            responseBody = { success: true, message: "QR_CODE_SEND_TO_EMAIL" };
         } else {
             const qrImage = await QRCode.toDataURL(memberRecord.qrUuid);
             responseBody = {
                 success: true,
-                message: "Code verified successfully.",
+                message: "CODE_VERIFIED_SUCCESSFULLY",
                 qrImage: qrImage,
                 member: memberRecord
             }
@@ -83,7 +83,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     } catch (error) {
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: "Internal Server Error" }),
+            body: JSON.stringify({ error: "INTERNAL_SERVER_ERROR" }),
         };
     }
 }

@@ -10,7 +10,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     if(!token) {
         return {
             statusCode: 401,
-            body: JSON.stringify({ error: "Unauthorized: No token provided" }),
+            body: JSON.stringify({ error: "NO_TOKEN_PROVIDED" }),
         };
     }
 
@@ -25,12 +25,12 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (!trimmedFirstName || !trimmedLastName || !trimmedEmail || typeof sendEmail !== "boolean") {
             return {
                 statusCode: 400,
-                body: JSON.stringify({ error: "first name , last name, email, and sendEmail are required" }),
+                body: JSON.stringify({ error: "MEMBER_REQUIRED" }),
             };
         } else if (trimmedEmail.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/) === null) {
             return {
                 statusCode: 400,
-                body: JSON.stringify({ error: "Invalid email format" }),
+                body: JSON.stringify({ error: "INVALID_EMAIL_FORMAT" }),
             };
         }
 
@@ -61,26 +61,26 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
                 return {
                     statusCode: 201,
-                    body: JSON.stringify({ message: "Member created and email sent", memberId: result.insertedId }),
+                    body: JSON.stringify({ message: "MEMBER_CREATED_EMAIL_SUCCESS", memberId: result.insertedId }),
                 };
             } else {
                 return {
                     statusCode: 201,
-                    body: JSON.stringify({ message: "Member created but failed to send email", details: error, memberId: result.insertedId }),
+                    body: JSON.stringify({ message: "MEMBER_CREATED_EMAIL_FAILED", details: error, memberId: result.insertedId }),
                 };
             }
         }
 
         return {
             statusCode: 201,
-            body: JSON.stringify({ message: "Member created", memberId: result.insertedId }),
+            body: JSON.stringify({ message: "MEMBER_CREATED", memberId: result.insertedId }),
         }
     } catch (error) {
         // Email already exists
         if (error instanceof MongoServerError && error.code === 11000) {
             return {
                 statusCode: 409,
-                body: JSON.stringify({ error: "Member with this email already exists" }),
+                body: JSON.stringify({ error: "MEMBER_EMAIL_EXISTS" }),
             };
         }
 
@@ -88,7 +88,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (error instanceof Error && error.message.includes("JWT")) {
             return {
                 statusCode: 401,
-                body: JSON.stringify({ error: "Unauthorized: Invalid token" })
+                body: JSON.stringify({ error: "INVALID_TOKEN" })
             };
         }
 

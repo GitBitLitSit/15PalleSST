@@ -8,7 +8,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     const token = event.headers.authorization?.split(" ")[1];
 
     if (!token) {
-        return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized: No token provided" }) };
+        return { statusCode: 401, body: JSON.stringify({ error: "NO_TOKEN_PROVIDED" }) };
     }
 
     try {
@@ -17,7 +17,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         const id = event.pathParameters?.id;
 
         if (!id) {
-            return { statusCode: 400, body: JSON.stringify({ error: "Member ID is required in the path" }) };
+            return { statusCode: 400, body: JSON.stringify({ error: "MEMBER_ID_REQUIRED" }) };
         }
 
         const db = await connectToMongo();
@@ -26,7 +26,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         const result = await collection.deleteOne({ _id: new ObjectId(id) as any });
 
         if (result.deletedCount === 0) {
-            return { statusCode: 404, body: JSON.stringify({ error: "Member not found" }) };
+            return { statusCode: 404, body: JSON.stringify({ error: "MEMBER_NOT_FOUND" }) };
         }
 
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
@@ -34,7 +34,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (error instanceof Error && error.message.includes("JWT")) {
             return {
                 statusCode: 401,
-                body: JSON.stringify({ error: "Unauthorized: Invalid token" })
+                body: JSON.stringify({ error: "INVALID_TOKEN" })
             };
         }
 

@@ -62,7 +62,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (!isAuthenticated) {
             return {
                 statusCode: 401,
-                body: JSON.stringify({ success: false, error: "Unauthorized: No valid credentials provided" }),
+                body: JSON.stringify({ success: false, error: "NO_VALID_CREDENTIALS" }),
             };
         }
 
@@ -73,7 +73,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (!trimmedQrCode) {
             return {
                 statusCode: 400,
-                body: JSON.stringify({ error: "QRUuid is required" }),
+                body: JSON.stringify({ error: "QRUUID_REQUIRED" }),
             };
         }
 
@@ -147,7 +147,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             statusCode: 200,
             body: JSON.stringify({ 
                 success: true, 
-                message: "Access Granted",
+                message: "ACCESS_GRANTED",
                 warning: warning,
                 member: {
                     firstName: member.firstName,
@@ -164,7 +164,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             statusCode: isJwtError ? 401 : 500,
             body: JSON.stringify({ 
                 success: false, 
-                error: isJwtError ? "Unauthorized: Invalid Token" : "Internal Server Error" 
+                error: isJwtError ? "INVALID_TOKEN" : "INTERNAL_SERVER_ERROR" 
             })
         };
     }

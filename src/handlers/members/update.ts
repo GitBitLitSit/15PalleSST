@@ -8,7 +8,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     const token = event.headers.authorization?.split(" ")[1];
 
     if (!token) {
-        return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized: No token provided" }) };
+        return { statusCode: 401, body: JSON.stringify({ error: "NO_TOKEN_PROVIDED" }) };
     }
 
     try {
@@ -16,7 +16,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
         const id = event.pathParameters?.id;
         if (!id) {
-            return { statusCode: 400, body: JSON.stringify({ error: "Member ID is required in the path" }) };
+            return { statusCode: 400, body: JSON.stringify({ error: "MEMBER_ID_REQUIRED_IN_PATH" }) };
         }
 
         const { firstName, lastName, email, blocked } = JSON.parse(event.body || "{}");
@@ -27,7 +27,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         const member = await collection.findOne({ _id: new ObjectId(id) as any });
 
         if (!member) {
-            return { statusCode: 404, body: JSON.stringify({ error: "Member not found" }) };
+            return { statusCode: 404, body: JSON.stringify({ error: "MEMBER_NOT_FOUND" }) };
         }
 
         const updateFields: Partial<Member> = {};
@@ -38,7 +38,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             if (trimmedEmail !== member.email) {
                 const emailConflict = await collection.findOne({ email: trimmedEmail });
                 if (emailConflict) {
-                    return { statusCode: 409, body: JSON.stringify({ error: "Email is already in use by another member" }) };
+                    return { statusCode: 409, body: JSON.stringify({ error: "MEMBER_EMAIL_EXISTS" }) };
                 }
 
                 updateFields.email = trimmedEmail;
@@ -69,13 +69,13 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (error instanceof Error && error.message.includes("JWT")) {
             return {
                 statusCode: 401,
-                body: JSON.stringify({ error: "Unauthorized: Invalid token" })
+                body: JSON.stringify({ error: "INVALID_TOKEN" })
             };
         }
 
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: "Internal Server Error", details: error instanceof Error ? error.message : String(error) })
+            body: JSON.stringify({ error: "INTERNAL_SERVER_ERROR", details: error instanceof Error ? error.message : String(error) })
         }
     }
 }

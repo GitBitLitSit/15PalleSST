@@ -6,7 +6,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     const token = event.headers.authorization?.split(" ")[1];
 
     if (!token) {
-        return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized: No token provided" })};
+        return { statusCode: 401, body: JSON.stringify({ error: "NO_TOKEN_PROVIDED" })};
     }
 
     try {
@@ -59,7 +59,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     } catch (error) {
         return {
             statusCode: error instanceof Error && error.message.includes("JWT") ? 401 : 500,
-            body: JSON.stringify({ error: "Internal Server Error" })
+            body: JSON.stringify({ error: "INTERNAL_SERVER_ERROR" })
         };
     }
 }

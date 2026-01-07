@@ -9,7 +9,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     const ip = event.requestContext.http.sourceIp;
 
     if (!username || !password) {
-        return { statusCode: 400, body: JSON.stringify({ error: "Missing credentials" }) };
+        return { statusCode: 400, body: JSON.stringify({ error: "MISSING_CREDENTIALS" }) };
     }
 
     const db = await connectToMongo();
@@ -23,7 +23,13 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     if (ipRecord && ipRecord.lockUntil && ipRecord.lockUntil > new Date()) {
         const minutesLeft = Math.ceil((ipRecord.lockUntil.getTime() - new Date().getTime()) / 60000);
 
-        return { statusCode: 429, body: JSON.stringify({ error: `Too many attempts. blocked for ${minutesLeft} minute(s).` })}
+        return { 
+            statusCode: 429, 
+            body: JSON.stringify({ 
+                error: "TOO_MANY_ATTEMPTS",
+                params: { minutes: minutesLeft}
+             })
+        };
     }
 
     const adminCount = await adminsCollection.countDocuments();
@@ -55,7 +61,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             { upsert: true }
         );
 
-        return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized: Invalid credentials" }) };
+        return { statusCode: 401, body: JSON.stringify({ error: "INVALID_CREDENTIALS" }) };
     }
 
     if (!admin) {
@@ -77,6 +83,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
     return {
         statusCode: 200,
-        body: JSON.stringify({ message: "Login successful", token }),
+        body: JSON.stringify({ message: "LOGIN_SUCCESSFUL", token }),
     }
 };

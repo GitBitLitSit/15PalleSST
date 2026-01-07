@@ -10,7 +10,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     if (!token) {
         return {
             statusCode: 401,
-            body: JSON.stringify({ error: "Unauthorized: No token provided" }),
+            body: JSON.stringify({ error: "NO_TOKEN_PROVIDED" }),
         };
     }
 
@@ -23,14 +23,14 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (!trimmedId) {
             return {
                 statusCode: 400,
-                body: JSON.stringify({ error: "Member ID is required" }),
+                body: JSON.stringify({ error: "MEMBER_ID_REQUIRED" }),
             };
         }
 
         if (!ObjectId.isValid(trimmedId)) {
              return {
                 statusCode: 400,
-                body: JSON.stringify({ error: "Invalid Member ID format" }),
+                body: JSON.stringify({ error: "INVALID_MEMBER_ID_FORMAT" }),
             };
         }
 
@@ -47,7 +47,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (result.matchedCount === 0) {
             return {
                 statusCode: 404,
-                body: JSON.stringify({ error: "Member not found" }),
+                body: JSON.stringify({ error: "MEMBER_NOT_FOUND" }),
             }
         }
 
@@ -55,7 +55,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             statusCode: 200,
             body: JSON.stringify({ 
                 success: true, 
-                message: "QR Code reset successfully",
+                message: "QR_CODE_RESET_SUCCESS",
                 qrUuid: newQrUuid
             }),
         };
@@ -68,7 +68,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         return {
             statusCode: isJwtError ? 401 : 500,
             body: JSON.stringify({ 
-                error: isJwtError ? "Unauthorized: Invalid Token" : "Internal Server Error" 
+                error: isJwtError ? "INVALID_TOKEN" : "INTERNAL_SERVER_ERROR" 
             }),
         };
     }
